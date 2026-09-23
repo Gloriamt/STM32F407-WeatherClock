@@ -1,0 +1,28 @@
+# Local credentials
+**/weather_secrets.h
+
+# Keil build products
+**/Output/
+**/Listing/
+*.axf
+*.bin
+*.crf
+*.d
+*.dep
+*.hex
+*.htm
+*.lnp
+*.map
+*.o
+*.sct
+
+# Keil per-user state
+*.uvguix.*
+*.uvopt
+*.uvoptx
+
+# Editor and OS files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
