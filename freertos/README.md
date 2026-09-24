@@ -15,7 +15,9 @@ Wi-Fi connection continues in the background.
   whose values changed.
 - `time` reads the STM32 RTC and publishes clock updates. A valid saved RTC is
   used while offline. SNTP synchronizes the RTC after connection and once per
-  hour; a failed write restores the previous time and validity state.
+  hour. After a failed write, the driver attempts to restore the previous RTC
+  value. A successful rollback preserves the previous time and validity state;
+  a failed rollback clears the validity marker and the UI shows placeholders.
 - `indoor` reads the DHT11 every 2 seconds. Its timing-sensitive transaction
   suspends scheduling briefly while leaving interrupts enabled.
 - `network` exclusively owns ESP-AT commands. It checks Wi-Fi every 5 seconds,
@@ -71,7 +73,13 @@ SNTP synchronization, time/date/weekday display, indoor readings, independent
 current and forecast weather updates, runtime disconnection and automatic
 reconnection. An injected RTC initialization failure also verified that retries
 continue without blocking Wi-Fi or weather processing; the injection was
-removed after the test, followed by a normal-path regression test.
+removed after the test, followed by a normal-path regression test. The periodic
+resynchronization path was tested by temporarily shortening its interval to 60
+seconds and observing a second successful RTC update. The production interval
+was then restored to one hour; a continuous one-hour run has not been performed
+solely to verify that final interval. An injected RTC write failure verified the
+successful-rollback branch. The branch where both the new write and rollback
+fail has not been injected on hardware.
 
 The kernel comes from `WeatherClock-main/third_lib/freertos` (FreeRTOS V10.4.3
 LTS Patch 3). `port.c` owns SVC, PendSV and SysTick. The tick hook maintains
