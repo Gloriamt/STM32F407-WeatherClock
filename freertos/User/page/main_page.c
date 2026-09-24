@@ -280,25 +280,19 @@ static const weather_icon_t *weather_icon_for_code(uint8_t code,
 #undef WEATHER_VISUAL
 }
 
-static void draw_weather_values(const esp_weather_t *weather)
+static void draw_current_weather(int16_t temperature, uint8_t code)
 {
     const weather_icon_t *icon;
     const uint8_t *label;
     uint8_t label_length;
 
-    icon = weather_icon_for_code(weather->code, &label, &label_length);
+    icon = weather_icon_for_code(code, &label, &label_length);
     LCD_SetColors(CL_WHITE, CL_WHITE);
     NT35510_Clear(58, 620, 190, 82);
-    NT35510_Clear(108, 716, 64, 28);
-    NT35510_Clear(218, 716, 64, 28);
     NT35510_Clear(306, 590, 110, 110);
     NT35510_Clear(306, 716, 110, 28);
     LCD_SetColors(CL_BLACK, CL_WHITE);
-    draw_chinese20(66, 720, text_high, 2);
-    draw_chinese20(176, 720, text_low, 2);
-    draw_temperature_value(66, 630, 64, weather->temperature);
-    draw_temperature_value(110, 720, 20, weather->high);
-    draw_temperature_value(220, 720, 20, weather->low);
+    draw_temperature_value(66, 630, 64, temperature);
     if (icon != NULL)
     {
         NT35510_DrawImageScaled(306, 590, 110, 110, icon);
@@ -312,6 +306,18 @@ static void draw_weather_values(const esp_weather_t *weather)
         LCD_SetColors(CL_BLACK, CL_WHITE);
         draw_text(354, 720, 20, 20, "-");
     }
+}
+
+static void draw_forecast(int16_t high, int16_t low)
+{
+    LCD_SetColors(CL_WHITE, CL_WHITE);
+    NT35510_Clear(108, 716, 64, 28);
+    NT35510_Clear(218, 716, 64, 28);
+    LCD_SetColors(CL_BLACK, CL_WHITE);
+    draw_chinese20(66, 720, text_high, 2);
+    draw_chinese20(176, 720, text_low, 2);
+    draw_temperature_value(110, 720, 20, high);
+    draw_temperature_value(220, 720, 20, low);
 }
 
 void ClockPage_ShowMain(const char *wifi_ssid)
@@ -357,7 +363,12 @@ void ClockPage_UpdateIndoor(uint8_t temperature, uint8_t humidity)
     draw_indoor_values(temperature, humidity);
 }
 
-void ClockPage_UpdateWeather(const esp_weather_t *weather)
+void ClockPage_UpdateCurrentWeather(int16_t temperature, uint8_t code)
 {
-    draw_weather_values(weather);
+    draw_current_weather(temperature, code);
+}
+
+void ClockPage_UpdateForecast(int16_t high, int16_t low)
+{
+    draw_forecast(high, low);
 }

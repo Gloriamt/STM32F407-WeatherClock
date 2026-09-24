@@ -31,8 +31,12 @@ typedef struct
     uint8_t time_query_attempted;
     uint8_t wifi_misses;
     uint8_t displayed_second;
+    uint8_t current_weather_valid;
+    uint8_t forecast_valid;
     char wifi_ssid[33];
     uint32_t last_weather_read;
+    uint32_t current_weather_updated_at;
+    uint32_t forecast_updated_at;
     uint32_t last_wifi_check;
     uint32_t last_esp_time_try;
     uint32_t last_dht11_read;
@@ -94,7 +98,11 @@ static void update_wifi(clock_app_state_t *state)
         if (!state->wifi_connected || strcmp(state->wifi_ssid, observed_ssid) != 0)
         {
             if (state->wifi_connected)
+            {
                 ClockUi_PostClearWeather();
+                state->current_weather_valid = 0U;
+                state->forecast_valid = 0U;
+            }
             strcpy(state->wifi_ssid, observed_ssid);
             state->wifi_connected = 1U;
             state->sntp_configured = 0U;
@@ -114,6 +122,8 @@ static void update_wifi(clock_app_state_t *state)
         state->esp_time_synced = 0U;
         state->time_query_attempted = 0U;
         state->wifi_misses = 0U;
+        state->current_weather_valid = 0U;
+        state->forecast_valid = 0U;
         ClockUi_PostWifiName(NULL);
         ClockUi_PostClearWeather();
         printf("[WIFI] disconnected\r\n");
@@ -166,23 +176,31 @@ static void update_weather(clock_app_state_t *state)
         return;
 
     state->last_weather_read = g_system_ms;
-    if (!EspAt_RequestWeather(&weather))
+    if (EspAt_RequestWeather(&weather))
     {
-        printf("[WEATHER] current request failed\r\n");
-        return;
+        state->current_weather_valid = 1U;
+        state->current_weather_updated_at = g_system_ms;
+        ClockUi_PostCurrentWeather(weather.temperature, weather.code);
+        printf("[WEATHER] current temperature=%d code=%u\r\n",
+               weather.temperature, weather.code);
+    }
+    else
+    {
+        printf("[WEATHER] current request failed; keeping previous data\r\n");
     }
 
-    printf("[WEATHER] current temperature=%d code=%u\r\n",
-           weather.temperature, weather.code);
-    if (!EspAt_RequestForecast(&weather))
+    if (EspAt_RequestForecast(&weather))
     {
-        printf("[WEATHER] forecast request failed\r\n");
-        return;
+        state->forecast_valid = 1U;
+        state->forecast_updated_at = g_system_ms;
+        ClockUi_PostForecast(weather.high, weather.low);
+        printf("[WEATHER] forecast high=%d low=%d\r\n",
+               weather.high, weather.low);
     }
-
-    printf("[WEATHER] forecast high=%d low=%d\r\n",
-           weather.high, weather.low);
-    ClockUi_PostWeather(&weather);
+    else
+    {
+        printf("[WEATHER] forecast request failed; keeping previous data\r\n");
+    }
 }
 
 static void update_indoor(clock_app_state_t *state)
