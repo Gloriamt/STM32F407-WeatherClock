@@ -1,46 +1,79 @@
-# Weather Clock FreeRTOS migration: runtime Wi-Fi recovery stage
+# Weather Clock FreeRTOS application
 
-This is an independent copy of the validated bare-metal project. Open
-`Project/RVMDK（uv5）/BH-F407.uvprojx` in Keil and build the `TOUCH` target.
-Keil generates the build output locally under `Output/`.
+This directory contains the FreeRTOS version of the STM32F407 weather clock.
+Open `Project/RVMDK（uv5）/BH-F407.uvprojx` in Keil and build the `TOUCH`
+target. Keil writes local build artifacts under `Output/`.
 
-The scheduler smoke test and both startup Wi-Fi paths have passed on hardware.
-The `init` task initializes the LCD, displays the startup page, waits up to 15
-seconds for Wi-Fi, shows the result for 3 seconds and opens the main page.
+## Runtime structure
 
-After startup, the `init` task creates a separate `time` task and deletes
-itself. The time task initializes the F407 RTC and posts clock updates to the
-UI queue after network time becomes available. With no network time, the page
-keeps the time placeholder.
+The startup task initializes the display and application state, starts the
+worker tasks and then deletes itself. The main page is available immediately;
+Wi-Fi connection continues in the background.
 
-A dedicated `ui` task is the only task that performs incremental LCD updates.
-The `indoor` task reads DHT11 every 2 seconds and posts copied values to the UI
-queue. Its timing-sensitive transaction suspends task scheduling for about 20
-ms but leaves interrupts enabled.
+- `ui` is the only task that writes to the LCD. Producers update a latest-state
+  mailbox and wake the UI through a one-entry queue. The UI redraws only fields
+  whose values changed.
+- `time` reads the STM32 RTC and publishes clock updates. A valid saved RTC is
+  used while offline. SNTP synchronizes the RTC after connection and once per
+  hour; a failed write restores the previous time and validity state.
+- `indoor` reads the DHT11 every 2 seconds. Its timing-sensitive transaction
+  suspends scheduling briefly while leaving interrupts enabled.
+- `network` exclusively owns ESP-AT commands. It checks Wi-Fi every 5 seconds,
+  treats two consecutive failures as a disconnection, and reconnects in the
+  background. The last successful weather data remains visible while offline,
+  together with its `HH:MM更新` timestamp. The timestamp is hidden again after
+  both current and forecast data have refreshed successfully.
 
-USART3 reception now follows the reference project's interrupt-driven design.
-Its RX interrupt stores bytes in a 1024-byte FreeRTOS queue at interrupt
-priority 5. The single `network` task owns all ESP-AT commands and blocks on
-that queue while waiting for replies, allowing the clock, UI and indoor tasks
-to keep running during HTTP requests. It performs SNTP synchronization and
-requests current weather plus the daily high/low every 60 seconds. Weather is
-copied to the UI queue.
+If RTC initialization fails, the clock stays unavailable and initialization is
+retried every 60 seconds. Network and weather processing continue during this
+condition, and the network time query is deferred until the RTC is available.
 
-The network task checks Wi-Fi every 5 seconds. Two consecutive failed checks
-mark it disconnected, post `-----` for the SSID and clear outdoor weather.
-The F407 RTC and indoor readings continue. The network task also exists after
-an initial 15-second startup failure, so a later connection is detected. On
-reconnection it posts the current SSID, configures SNTP again, synchronizes the
-RTC and immediately requests weather.
+## Serial ownership
 
-USART1 PA9/PA10 remains the PC debug port at 115200 8-N-1. USART3 PB10/PB11
-remains the exclusive ESP-AT channel. Only one task currently uses ESP-AT.
+USART1 PA9/PA10 is the PC debug port at 115200 8-N-1. USART3 PB10/PB11 is the
+exclusive ESP-AT channel.
 
-The kernel is copied from `WeatherClock-main/third_lib/freertos` (FreeRTOS
-V10.4.3 LTS Patch 3). `port.c` owns SVC, PendSV and SysTick. The tick hook
-maintains `g_system_ms` for the later driver migration. The RTOS heap starts
-at 32 KiB; measure stack and heap before adding business tasks.
+USART3 RX uses an interrupt-driven 1024-byte FreeRTOS queue. The interrupt runs
+at priority 5 and stores received bytes in the queue; the network task blocks on
+the queue while waiting for ESP responses. No other task sends ESP-AT commands.
 
-The complete flow has passed hardware testing: scheduler,
-both startup Wi-Fi paths, time/date/weekday, indoor readings, weather updates,
-runtime disconnection and automatic reconnection.
+## Runtime measurements
+
+The application prints a low-frequency `[METRICS]` report every 60 seconds.
+Measurements on the target board on 2026-09-24 produced the following maxima
+and minimum remaining stack values:
+
+| Metric | Observed value |
+| --- | ---: |
+| UI task minimum remaining stack | 940 words |
+| Time task minimum remaining stack | 451 words |
+| Network task minimum remaining stack | 663 words |
+| Indoor task minimum remaining stack | 482 words |
+| UI update maximum duration | 11 ms |
+| DHT transaction maximum duration | 24 ms |
+| Current-weather request maximum duration | 1152 ms |
+| Forecast request maximum duration | 1050 ms |
+| ESP response overflows | 0 |
+| ESP RX queue overflows | 0 |
+| ESP dropped bytes | 0 |
+| ESP parse errors | 0 |
+
+These values are observations from one hardware test session rather than fixed
+limits. They show no current need to replace the ESP byte queue with a ring
+buffer or DMA, so the simpler interrupt-and-queue design is retained. Keep the
+metrics enabled during longer tests and reconsider the RX design if overflow,
+dropped-byte or parser counters increase. Heap usage has not yet been measured.
+
+## Validation status
+
+Hardware validation covers online and offline startup, saved RTC operation,
+SNTP synchronization, time/date/weekday display, indoor readings, independent
+current and forecast weather updates, runtime disconnection and automatic
+reconnection. An injected RTC initialization failure also verified that retries
+continue without blocking Wi-Fi or weather processing; the injection was
+removed after the test, followed by a normal-path regression test.
+
+The kernel comes from `WeatherClock-main/third_lib/freertos` (FreeRTOS V10.4.3
+LTS Patch 3). `port.c` owns SVC, PendSV and SysTick. The tick hook maintains
+`g_system_ms`, including while the scheduler is suspended for the DHT timing
+window. The RTOS heap is configured as 32 KiB.

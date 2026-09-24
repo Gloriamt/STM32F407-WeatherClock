@@ -12,6 +12,9 @@
 #define CLOCK_UI_DIRTY_WEATHER_UPDATED_AT   (1U << 4)
 #define CLOCK_UI_DIRTY_WIFI_NAME            (1U << 5)
 #define CLOCK_UI_DIRTY_CLEAR_WEATHER        (1U << 6)
+#define CLOCK_UI_STACK_SAMPLE_INTERVAL_MS  10000U
+
+extern volatile uint32_t g_system_ms;
 
 typedef struct
 {
@@ -44,6 +47,8 @@ typedef struct
 
 static QueueHandle_t ui_wake_queue;
 static clock_ui_pending_t ui_pending;
+static uint32_t ui_max_draw_ms;
+static uint32_t ui_min_stack_words;
 
 static void clock_ui_wake(void)
 {
@@ -55,9 +60,14 @@ static void clock_ui_wake(void)
 static void clock_ui_task(void *argument)
 {
     clock_ui_pending_t snapshot;
+    uint32_t draw_elapsed;
+    uint32_t draw_started;
+    uint32_t last_stack_sample = 0U;
+    UBaseType_t stack_words;
     uint8_t signal;
 
     (void)argument;
+    ui_min_stack_words = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
     for (;;)
     {
         if (xQueueReceive(ui_wake_queue, &signal, portMAX_DELAY) != pdPASS)
@@ -67,6 +77,8 @@ static void clock_ui_task(void *argument)
         snapshot = ui_pending;
         ui_pending.dirty = 0U;
         taskEXIT_CRITICAL();
+
+        draw_started = g_system_ms;
 
         if ((snapshot.dirty & CLOCK_UI_DIRTY_CLEAR_WEATHER) != 0U)
             ClockPage_ClearWeather();
@@ -117,12 +129,27 @@ static void clock_ui_task(void *argument)
             ClockPage_UpdateWifiName(snapshot.wifi_ssid[0] != 0 ?
                                      snapshot.wifi_ssid : NULL);
         }
+
+        draw_elapsed = g_system_ms - draw_started;
+        if (draw_elapsed > ui_max_draw_ms)
+            ui_max_draw_ms = draw_elapsed;
+
+        if ((g_system_ms - last_stack_sample) >=
+            CLOCK_UI_STACK_SAMPLE_INTERVAL_MS)
+        {
+            last_stack_sample = g_system_ms;
+            stack_words = uxTaskGetStackHighWaterMark(NULL);
+            if ((uint32_t)stack_words < ui_min_stack_words)
+                ui_min_stack_words = (uint32_t)stack_words;
+        }
     }
 }
 
 uint8_t ClockUi_Init(void)
 {
     memset(&ui_pending, 0, sizeof(ui_pending));
+    ui_max_draw_ms = 0U;
+    ui_min_stack_words = 0U;
     ui_wake_queue = xQueueCreate(1U, sizeof(uint8_t));
     if (ui_wake_queue == NULL)
         return 0U;
@@ -131,6 +158,17 @@ uint8_t ClockUi_Init(void)
         return 0U;
 
     return 1U;
+}
+
+void ClockUi_GetDiagnostics(clock_ui_diagnostics_t *diagnostics)
+{
+    if (diagnostics == NULL)
+        return;
+
+    taskENTER_CRITICAL();
+    diagnostics->max_draw_ms = ui_max_draw_ms;
+    diagnostics->min_stack_words = ui_min_stack_words;
+    taskEXIT_CRITICAL();
 }
 
 void ClockUi_PostTime(const weather_rtc_time_t *time)
