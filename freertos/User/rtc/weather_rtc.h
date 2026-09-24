@@ -15,7 +15,8 @@ typedef struct
 } weather_rtc_time_t;
 
 uint8_t WeatherRtc_Init(void);
+uint8_t WeatherRtc_IsTimeValid(void);
 void WeatherRtc_Get(weather_rtc_time_t *time);
-void WeatherRtc_Set(const weather_rtc_time_t *time);
+uint8_t WeatherRtc_Set(const weather_rtc_time_t *time);
 
 #endif

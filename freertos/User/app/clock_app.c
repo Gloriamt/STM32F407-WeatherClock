@@ -150,9 +150,8 @@ static void update_network_time(clock_app_state_t *state)
     }
 
     state->time_query_attempted = 1U;
-    if (EspAt_RequestTime(&network_time))
+    if (EspAt_RequestTime(&network_time) && WeatherRtc_Set(&network_time))
     {
-        WeatherRtc_Set(&network_time);
         state->esp_time_synced = 1U;
         state->time_available = 1U;
         state->rtc_ready = 1U;
@@ -252,11 +251,18 @@ uint8_t ClockApp_RunStartupStage(void)
 void ClockApp_TimeTask(void *argument)
 {
     weather_rtc_time_t rtc_time;
+    uint8_t rtc_ready;
+    uint8_t time_valid;
     uint8_t displayed_second = 0xFFU;
 
     (void)argument;
 
-    rtos_rtc_ready = WeatherRtc_Init();
+    rtc_ready = WeatherRtc_Init();
+    time_valid = rtc_ready ? WeatherRtc_IsTimeValid() : 0U;
+    rtos_time_available = time_valid;
+    rtos_rtc_ready = rtc_ready;
+    printf(time_valid ? "[RTC] valid saved time available\r\n" :
+                        "[RTC] waiting for first valid network time\r\n");
 
     for (;;)
     {
@@ -281,6 +287,7 @@ void ClockApp_NetworkTask(void *argument)
         vTaskDelay(pdMS_TO_TICKS(10U));
 
     rtos_state.rtc_ready = 1U;
+    rtos_state.time_available = rtos_time_available;
     rtos_state.displayed_second = 0xFFU;
     rtos_state.last_esp_time_try = g_system_ms - TIME_RETRY_INTERVAL_MS;
     rtos_state.last_weather_read = g_system_ms - WEATHER_INTERVAL_MS;
@@ -335,6 +342,7 @@ void ClockApp_Run(void)
     ClockPage_ShowMain(state.wifi_connected ? state.wifi_ssid : NULL);
     DHT11_Init();
     state.rtc_ready = WeatherRtc_Init();
+    state.time_available = state.rtc_ready ? WeatherRtc_IsTimeValid() : 0U;
     state.displayed_second = 0xFFU;
     state.last_weather_read = g_system_ms - WEATHER_INTERVAL_MS;
     state.last_esp_time_try = g_system_ms - 7000U;
