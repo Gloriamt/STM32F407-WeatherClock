@@ -5,113 +5,126 @@
 #include "clock_ui.h"
 #include "../page/clock_page.h"
 
-#define CLOCK_UI_QUEUE_LENGTH  8U
-
-typedef enum
-{
-    CLOCK_UI_TIME,
-    CLOCK_UI_CLEAR_TIME,
-    CLOCK_UI_INDOOR,
-    CLOCK_UI_CURRENT_WEATHER,
-    CLOCK_UI_FORECAST,
-    CLOCK_UI_WEATHER_UPDATED_AT,
-    CLOCK_UI_CLEAR_WEATHER_UPDATE_TIME,
-    CLOCK_UI_WIFI_NAME,
-    CLOCK_UI_CLEAR_WEATHER
-} clock_ui_action_t;
+#define CLOCK_UI_DIRTY_TIME                 (1U << 0)
+#define CLOCK_UI_DIRTY_INDOOR               (1U << 1)
+#define CLOCK_UI_DIRTY_CURRENT_WEATHER      (1U << 2)
+#define CLOCK_UI_DIRTY_FORECAST             (1U << 3)
+#define CLOCK_UI_DIRTY_WEATHER_UPDATED_AT   (1U << 4)
+#define CLOCK_UI_DIRTY_WIFI_NAME            (1U << 5)
+#define CLOCK_UI_DIRTY_CLEAR_WEATHER        (1U << 6)
 
 typedef struct
 {
-    clock_ui_action_t action;
-    union
+    uint16_t dirty;
+    uint8_t time_visible;
+    weather_rtc_time_t time;
+    struct
     {
-        weather_rtc_time_t time;
-        struct
-        {
-            uint8_t temperature;
-            uint8_t humidity;
-        } indoor;
-        struct
-        {
-            int16_t temperature;
-            uint8_t code;
-        } current_weather;
-        struct
-        {
-            int16_t high;
-            int16_t low;
-        } forecast;
-        struct
-        {
-            uint8_t hour;
-            uint8_t minute;
-        } weather_updated_at;
-        char wifi_ssid[33];
-    } data;
-} clock_ui_message_t;
+        uint8_t temperature;
+        uint8_t humidity;
+    } indoor;
+    struct
+    {
+        int16_t temperature;
+        uint8_t code;
+    } current_weather;
+    struct
+    {
+        int16_t high;
+        int16_t low;
+    } forecast;
+    uint8_t weather_updated_at_visible;
+    struct
+    {
+        uint8_t hour;
+        uint8_t minute;
+    } weather_updated_at;
+    char wifi_ssid[33];
+} clock_ui_pending_t;
 
-static QueueHandle_t ui_queue;
+static QueueHandle_t ui_wake_queue;
+static clock_ui_pending_t ui_pending;
+
+static void clock_ui_wake(void)
+{
+    uint8_t signal = 1U;
+
+    (void)xQueueOverwrite(ui_wake_queue, &signal);
+}
 
 static void clock_ui_task(void *argument)
 {
-    clock_ui_message_t message;
+    clock_ui_pending_t snapshot;
+    uint8_t signal;
 
     (void)argument;
     for (;;)
     {
-        if (xQueueReceive(ui_queue, &message, portMAX_DELAY) == pdPASS)
+        if (xQueueReceive(ui_wake_queue, &signal, portMAX_DELAY) != pdPASS)
+            continue;
+
+        taskENTER_CRITICAL();
+        snapshot = ui_pending;
+        ui_pending.dirty = 0U;
+        taskEXIT_CRITICAL();
+
+        if ((snapshot.dirty & CLOCK_UI_DIRTY_CLEAR_WEATHER) != 0U)
+            ClockPage_ClearWeather();
+
+        if ((snapshot.dirty & CLOCK_UI_DIRTY_TIME) != 0U)
         {
-            if (message.action == CLOCK_UI_TIME)
-            {
-                ClockPage_UpdateTime(&message.data.time);
-            }
-            else if (message.action == CLOCK_UI_CLEAR_TIME)
-            {
+            if (snapshot.time_visible)
+                ClockPage_UpdateTime(&snapshot.time);
+            else
                 ClockPage_ClearTime();
-            }
-            else if (message.action == CLOCK_UI_INDOOR)
-            {
-                ClockPage_UpdateIndoor(message.data.indoor.temperature,
-                                       message.data.indoor.humidity);
-            }
-            else if (message.action == CLOCK_UI_CURRENT_WEATHER)
-            {
-                ClockPage_UpdateCurrentWeather(
-                    message.data.current_weather.temperature,
-                    message.data.current_weather.code);
-            }
-            else if (message.action == CLOCK_UI_FORECAST)
-            {
-                ClockPage_UpdateForecast(message.data.forecast.high,
-                                         message.data.forecast.low);
-            }
-            else if (message.action == CLOCK_UI_WEATHER_UPDATED_AT)
+        }
+
+        if ((snapshot.dirty & CLOCK_UI_DIRTY_INDOOR) != 0U)
+        {
+            ClockPage_UpdateIndoor(snapshot.indoor.temperature,
+                                   snapshot.indoor.humidity);
+        }
+
+        if ((snapshot.dirty & CLOCK_UI_DIRTY_CURRENT_WEATHER) != 0U)
+        {
+            ClockPage_UpdateCurrentWeather(
+                snapshot.current_weather.temperature,
+                snapshot.current_weather.code);
+        }
+
+        if ((snapshot.dirty & CLOCK_UI_DIRTY_FORECAST) != 0U)
+        {
+            ClockPage_UpdateForecast(snapshot.forecast.high,
+                                     snapshot.forecast.low);
+        }
+
+        if ((snapshot.dirty & CLOCK_UI_DIRTY_WEATHER_UPDATED_AT) != 0U)
+        {
+            if (snapshot.weather_updated_at_visible)
             {
                 ClockPage_UpdateWeatherTime(
-                    message.data.weather_updated_at.hour,
-                    message.data.weather_updated_at.minute);
+                    snapshot.weather_updated_at.hour,
+                    snapshot.weather_updated_at.minute);
             }
-            else if (message.action == CLOCK_UI_CLEAR_WEATHER_UPDATE_TIME)
+            else
             {
                 ClockPage_ClearWeatherTime();
             }
-            else if (message.action == CLOCK_UI_WIFI_NAME)
-            {
-                ClockPage_UpdateWifiName(message.data.wifi_ssid[0] != 0 ?
-                                         message.data.wifi_ssid : NULL);
-            }
-            else if (message.action == CLOCK_UI_CLEAR_WEATHER)
-            {
-                ClockPage_ClearWeather();
-            }
+        }
+
+        if ((snapshot.dirty & CLOCK_UI_DIRTY_WIFI_NAME) != 0U)
+        {
+            ClockPage_UpdateWifiName(snapshot.wifi_ssid[0] != 0 ?
+                                     snapshot.wifi_ssid : NULL);
         }
     }
 }
 
 uint8_t ClockUi_Init(void)
 {
-    ui_queue = xQueueCreate(CLOCK_UI_QUEUE_LENGTH, sizeof(clock_ui_message_t));
-    if (ui_queue == NULL)
+    memset(&ui_pending, 0, sizeof(ui_pending));
+    ui_wake_queue = xQueueCreate(1U, sizeof(uint8_t));
+    if (ui_wake_queue == NULL)
         return 0U;
 
     if (xTaskCreate(clock_ui_task, "ui", 1024U, NULL, 2U, NULL) != pdPASS)
@@ -122,91 +135,100 @@ uint8_t ClockUi_Init(void)
 
 void ClockUi_PostTime(const weather_rtc_time_t *time)
 {
-    clock_ui_message_t message;
+    if (time == NULL)
+        return;
 
-    message.action = CLOCK_UI_TIME;
-    message.data.time = *time;
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    taskENTER_CRITICAL();
+    ui_pending.time = *time;
+    ui_pending.time_visible = 1U;
+    ui_pending.dirty |= CLOCK_UI_DIRTY_TIME;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
 
 void ClockUi_PostClearTime(void)
 {
-    clock_ui_message_t message;
-
-    message.action = CLOCK_UI_CLEAR_TIME;
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    taskENTER_CRITICAL();
+    ui_pending.time_visible = 0U;
+    ui_pending.dirty |= CLOCK_UI_DIRTY_TIME;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
 
 void ClockUi_PostIndoor(uint8_t temperature, uint8_t humidity)
 {
-    clock_ui_message_t message;
-
-    message.action = CLOCK_UI_INDOOR;
-    message.data.indoor.temperature = temperature;
-    message.data.indoor.humidity = humidity;
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    taskENTER_CRITICAL();
+    ui_pending.indoor.temperature = temperature;
+    ui_pending.indoor.humidity = humidity;
+    ui_pending.dirty |= CLOCK_UI_DIRTY_INDOOR;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
 
 void ClockUi_PostCurrentWeather(int16_t temperature, uint8_t code)
 {
-    clock_ui_message_t message;
-
-    message.action = CLOCK_UI_CURRENT_WEATHER;
-    message.data.current_weather.temperature = temperature;
-    message.data.current_weather.code = code;
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    taskENTER_CRITICAL();
+    ui_pending.current_weather.temperature = temperature;
+    ui_pending.current_weather.code = code;
+    ui_pending.dirty |= CLOCK_UI_DIRTY_CURRENT_WEATHER;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
 
 void ClockUi_PostForecast(int16_t high, int16_t low)
 {
-    clock_ui_message_t message;
-
-    message.action = CLOCK_UI_FORECAST;
-    message.data.forecast.high = high;
-    message.data.forecast.low = low;
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    taskENTER_CRITICAL();
+    ui_pending.forecast.high = high;
+    ui_pending.forecast.low = low;
+    ui_pending.dirty |= CLOCK_UI_DIRTY_FORECAST;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
 
 void ClockUi_PostWeatherUpdatedAt(uint8_t hour, uint8_t minute)
 {
-    clock_ui_message_t message;
-
-    message.action = CLOCK_UI_WEATHER_UPDATED_AT;
-    message.data.weather_updated_at.hour = hour;
-    message.data.weather_updated_at.minute = minute;
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    taskENTER_CRITICAL();
+    ui_pending.weather_updated_at.hour = hour;
+    ui_pending.weather_updated_at.minute = minute;
+    ui_pending.weather_updated_at_visible = 1U;
+    ui_pending.dirty |= CLOCK_UI_DIRTY_WEATHER_UPDATED_AT;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
 
 void ClockUi_PostClearWeatherUpdateTime(void)
 {
-    clock_ui_message_t message;
-
-    message.action = CLOCK_UI_CLEAR_WEATHER_UPDATE_TIME;
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    taskENTER_CRITICAL();
+    ui_pending.weather_updated_at_visible = 0U;
+    ui_pending.dirty |= CLOCK_UI_DIRTY_WEATHER_UPDATED_AT;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
 
 void ClockUi_PostWifiName(const char *ssid)
 {
-    clock_ui_message_t message;
-
-    message.action = CLOCK_UI_WIFI_NAME;
+    taskENTER_CRITICAL();
     if (ssid == NULL)
     {
-        message.data.wifi_ssid[0] = 0;
+        ui_pending.wifi_ssid[0] = 0;
     }
     else
     {
-        strncpy(message.data.wifi_ssid, ssid,
-                sizeof(message.data.wifi_ssid) - 1U);
-        message.data.wifi_ssid[sizeof(message.data.wifi_ssid) - 1U] = 0;
+        strncpy(ui_pending.wifi_ssid, ssid,
+                sizeof(ui_pending.wifi_ssid) - 1U);
+        ui_pending.wifi_ssid[sizeof(ui_pending.wifi_ssid) - 1U] = 0;
     }
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    ui_pending.dirty |= CLOCK_UI_DIRTY_WIFI_NAME;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
 
 void ClockUi_PostClearWeather(void)
 {
-    clock_ui_message_t message;
-
-    message.action = CLOCK_UI_CLEAR_WEATHER;
-    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+    taskENTER_CRITICAL();
+    ui_pending.dirty &= (uint16_t)~(CLOCK_UI_DIRTY_CURRENT_WEATHER |
+                                    CLOCK_UI_DIRTY_FORECAST);
+    ui_pending.dirty |= CLOCK_UI_DIRTY_CLEAR_WEATHER;
+    taskEXIT_CRITICAL();
+    clock_ui_wake();
 }
