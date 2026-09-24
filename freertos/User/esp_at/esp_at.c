@@ -1,4 +1,5 @@
 #include "esp_at.h"
+#include "at_response.h"
 #include "weather_secrets.h"
 #include "stm32f4xx.h"
 #include <string.h>
@@ -21,6 +22,26 @@ extern volatile uint32_t g_system_ms;
 
 static char sntp_last_response[256];
 static QueueHandle_t esp_rx_queue;
+static volatile esp_at_diagnostics_t esp_diagnostics;
+static volatile uint32_t rx_queue_dropped_bytes;
+static uint32_t command_rx_drop_start;
+static esp_at_result_t last_result = ESP_AT_RESULT_OK;
+
+static esp_at_result_t record_result(esp_at_result_t result)
+{
+    last_result = result;
+    if (result == ESP_AT_RESULT_AT_ERROR)
+        esp_diagnostics.at_errors++;
+    else if (result == ESP_AT_RESULT_TIMEOUT)
+        esp_diagnostics.timeouts++;
+    else if (result == ESP_AT_RESULT_RESPONSE_OVERFLOW)
+        esp_diagnostics.response_overflows++;
+    else if (result == ESP_AT_RESULT_RX_QUEUE_OVERFLOW)
+        esp_diagnostics.rx_queue_overflows++;
+    else if (result == ESP_AT_RESULT_PARSE_ERROR)
+        esp_diagnostics.parse_errors++;
+    return result;
+}
 
 static void esp_uart_config(void)
 {
@@ -61,36 +82,49 @@ static void uart_begin_command(const char *command)
     (void)xQueueReset(esp_rx_queue);
     while (USART_GetFlagStatus(ESP_USART, USART_FLAG_RXNE) != RESET)
         (void)USART_ReceiveData(ESP_USART);
+    command_rx_drop_start = rx_queue_dropped_bytes;
     USART_ITConfig(ESP_USART, USART_IT_RXNE, ENABLE);
     uart_puts(command);
 }
 
-static uint8_t uart_wait_response(char *response, uint16_t response_size,
-                                  uint32_t timeout_ms)
+static esp_at_result_t uart_wait_response(char *response,
+                                          uint16_t response_size,
+                                          uint32_t timeout_ms)
 {
-    uint16_t position = 0U;
+    at_response_capture_t capture;
+    at_response_terminal_t terminal;
     uint32_t start = g_system_ms;
     uint32_t elapsed;
     uint8_t byte;
 
-    response[0] = 0;
+    AtResponse_Init(&capture, response, response_size);
     while ((elapsed = g_system_ms - start) < timeout_ms)
     {
+        if (rx_queue_dropped_bytes != command_rx_drop_start)
+            return record_result(ESP_AT_RESULT_RX_QUEUE_OVERFLOW);
+
         if (xQueueReceive(esp_rx_queue, &byte,
                           pdMS_TO_TICKS(timeout_ms - elapsed)) != pdPASS)
             break;
 
-        if (position < response_size - 1U)
+        terminal = AtResponse_Push(&capture, byte);
+        if (terminal != AT_RESPONSE_PENDING)
         {
-            response[position++] = (char)byte;
-            response[position] = 0;
+            if (rx_queue_dropped_bytes != command_rx_drop_start)
+                return record_result(ESP_AT_RESULT_RX_QUEUE_OVERFLOW);
+            if (capture.overflowed)
+                return record_result(ESP_AT_RESULT_RESPONSE_OVERFLOW);
+            if (terminal == AT_RESPONSE_ERROR)
+                return record_result(ESP_AT_RESULT_AT_ERROR);
+            return record_result(ESP_AT_RESULT_OK);
         }
-        if (strstr(response, "\r\nOK\r\n") != NULL)
-            return 1U;
-        if (strstr(response, "\r\nERROR\r\n") != NULL)
-            return 0U;
     }
-    return 0U;
+
+    if (rx_queue_dropped_bytes != command_rx_drop_start)
+        return record_result(ESP_AT_RESULT_RX_QUEUE_OVERFLOW);
+    if (capture.overflowed)
+        return record_result(ESP_AT_RESULT_RESPONSE_OVERFLOW);
+    return record_result(ESP_AT_RESULT_TIMEOUT);
 }
 
 uint8_t EspAt_RequestWeather(esp_weather_t *w)
@@ -102,10 +136,15 @@ uint8_t EspAt_RequestWeather(esp_weather_t *w)
 
     sprintf(cmd, "AT+HTTPCLIENT=2,1,\"https://api.seniverse.com/v3/weather/now.json?key=%s&location=shanghai&language=en&unit=c\",,,2\r\n", WEATHER_API_KEY);
     uart_begin_command(cmd);
-    if (!uart_wait_response(buf, sizeof(buf), 8000U))
+    if (uart_wait_response(buf, sizeof(buf), 8000U) != ESP_AT_RESULT_OK)
         return 0U;
 
-    return WeatherParser_ParseCurrent(buf, w);
+    if (!WeatherParser_ParseCurrent(buf, w))
+    {
+        record_result(ESP_AT_RESULT_PARSE_ERROR);
+        return 0U;
+    }
+    return 1U;
 }
 
 uint8_t EspAt_RequestForecast(esp_weather_t *w)
@@ -117,10 +156,15 @@ uint8_t EspAt_RequestForecast(esp_weather_t *w)
 
     sprintf(cmd,"AT+HTTPCLIENT=2,1,\"https://api.seniverse.com/v3/weather/daily.json?key=%s&location=shanghai&language=en&unit=c&start=0&days=1\",,,2\r\n",WEATHER_API_KEY);
     uart_begin_command(cmd);
-    if (!uart_wait_response(buf, sizeof(buf), 8000U))
+    if (uart_wait_response(buf, sizeof(buf), 8000U) != ESP_AT_RESULT_OK)
         return 0U;
 
-    return WeatherParser_ParseForecast(buf, w);
+    if (!WeatherParser_ParseForecast(buf, w))
+    {
+        record_result(ESP_AT_RESULT_PARSE_ERROR);
+        return 0U;
+    }
+    return 1U;
 }
 
 static void uart_puts(const char *s)
@@ -143,7 +187,8 @@ uint8_t EspAt_ConfigureSntp(void)
     char response[96];
 
     uart_begin_command("AT+CIPSNTPCFG=1,8,\"ntp1.aliyun.com\",\"ntp2.aliyun.com\"\r\n");
-    return uart_wait_response(response, sizeof(response), 3000U);
+    return (uart_wait_response(response, sizeof(response), 3000U) ==
+            ESP_AT_RESULT_OK) ? 1U : 0U;
 }
 
 uint8_t EspAt_IsWifiConnected(char *ssid, uint8_t ssid_size)
@@ -154,7 +199,8 @@ uint8_t EspAt_IsWifiConnected(char *ssid, uint8_t ssid_size)
         ssid[0] = 0;
 
     uart_begin_command("AT+CWSTATE?\r\n");
-    if (uart_wait_response(response, sizeof(response), 1200U))
+    if (uart_wait_response(response, sizeof(response), 1200U) ==
+        ESP_AT_RESULT_OK)
     {
         const char *state = strstr(response, "+CWSTATE:");
         if (state != NULL && state[9] == '2' &&
@@ -201,7 +247,14 @@ uint8_t EspAt_SyncRtcFromSntp(weather_rtc_time_t *time)
     uint8_t wd;
     uint8_t mo;
 
-    if (!uart_wait_response(sntp_last_response, sizeof(sntp_last_response), 5000U))
+    if (time == NULL)
+    {
+        record_result(ESP_AT_RESULT_PARSE_ERROR);
+        return 0U;
+    }
+
+    if (uart_wait_response(sntp_last_response, sizeof(sntp_last_response),
+                           5000U) != ESP_AT_RESULT_OK)
         return 0U;
 
     p = strstr(sntp_last_response, "+CIPSNTPTIME:");
@@ -219,12 +272,43 @@ uint8_t EspAt_SyncRtcFromSntp(weather_rtc_time_t *time)
             return 1U;
         }
     }
-    return 0;
+    record_result(ESP_AT_RESULT_PARSE_ERROR);
+    return 0U;
 }
 
 const char *EspAt_LastTimeResponse(void)
 {
     return sntp_last_response;
+}
+
+esp_at_result_t EspAt_LastResult(void)
+{
+    return last_result;
+}
+
+const char *EspAt_ResultName(esp_at_result_t result)
+{
+    static const char *const names[] = {
+        "ok", "at-error", "timeout", "response-overflow",
+        "rx-queue-overflow", "parse-error"
+    };
+
+    if ((uint8_t)result >= (uint8_t)(sizeof(names) / sizeof(names[0])))
+        return "unknown";
+    return names[result];
+}
+
+void EspAt_GetDiagnostics(esp_at_diagnostics_t *diagnostics)
+{
+    if (diagnostics == 0)
+        return;
+
+    diagnostics->at_errors = esp_diagnostics.at_errors;
+    diagnostics->timeouts = esp_diagnostics.timeouts;
+    diagnostics->response_overflows = esp_diagnostics.response_overflows;
+    diagnostics->rx_queue_overflows = esp_diagnostics.rx_queue_overflows;
+    diagnostics->rx_dropped_bytes = rx_queue_dropped_bytes;
+    diagnostics->parse_errors = esp_diagnostics.parse_errors;
 }
 
 /* Request the current module time, then parse its direct response. */
@@ -242,8 +326,12 @@ void USART3_IRQHandler(void)
     if (USART_GetITStatus(ESP_USART, USART_IT_RXNE) != RESET)
     {
         byte = (uint8_t)USART_ReceiveData(ESP_USART);
-        if (esp_rx_queue != NULL)
-            (void)xQueueSendFromISR(esp_rx_queue, &byte, &higher_priority_task_woken);
+        if (esp_rx_queue != NULL &&
+            xQueueSendFromISR(esp_rx_queue, &byte,
+                              &higher_priority_task_woken) != pdPASS)
+        {
+            rx_queue_dropped_bytes++;
+        }
         USART_ClearITPendingBit(ESP_USART, USART_IT_RXNE);
         portYIELD_FROM_ISR(higher_priority_task_woken);
     }
