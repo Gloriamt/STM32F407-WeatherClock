@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#include "stm32f4xx.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "clock_app.h"
@@ -9,29 +8,24 @@
 #include "../esp_at/esp_at.h"
 #include "../page/clock_page.h"
 #include "../rtc/weather_rtc.h"
-#include "../usart/bsp_debug_usart.h"
 
-#define WIFI_CONNECT_TIMEOUT_MS  15000U
 #define WIFI_CHECK_INTERVAL_MS     5000U
 #define WIFI_DISCONNECT_MISSES        2U
 #define TIME_RETRY_INTERVAL_MS   10000U
 #define TIME_SYNC_INTERVAL_MS  3600000U
 #define WEATHER_INTERVAL_MS     60000U
 #define INDOOR_INTERVAL_MS       2000U
-#define RTC_REFRESH_INTERVAL_MS   200U
 
 extern volatile uint32_t g_system_ms;
 
 typedef struct
 {
-    uint8_t rtc_ready;
     uint8_t wifi_connected;
     uint8_t sntp_configured;
     uint8_t esp_time_synced;
     uint8_t time_available;
     uint8_t time_query_attempted;
     uint8_t wifi_misses;
-    uint8_t displayed_second;
     uint8_t current_weather_valid;
     uint8_t forecast_valid;
     uint8_t complete_weather_time_valid;
@@ -43,18 +37,11 @@ typedef struct
     uint32_t forecast_updated_at;
     uint32_t last_wifi_check;
     uint32_t last_esp_time_try;
-    uint32_t last_dht11_read;
-    uint32_t last_rtc_read;
 } clock_app_state_t;
 
 static clock_app_state_t rtos_state;
 static volatile uint8_t rtos_rtc_ready;
 static volatile uint8_t rtos_time_available;
-
-static void wait_ms(uint32_t duration)
-{
-    vTaskDelay(pdMS_TO_TICKS(duration));
-}
 
 static void print_esp_failure(const char *operation)
 {
@@ -71,40 +58,6 @@ static void print_esp_failure(const char *operation)
            (unsigned long)diagnostics.rx_queue_overflows,
            (unsigned long)diagnostics.rx_dropped_bytes,
            (unsigned long)diagnostics.parse_errors);
-}
-
-static void wait_for_wifi(clock_app_state_t *state)
-{
-    uint32_t wifi_start = g_system_ms;
-
-    wait_ms(1500U);
-    do
-    {
-        if (EspAt_IsWifiConnected(state->wifi_ssid, sizeof(state->wifi_ssid)))
-        {
-            state->wifi_connected = 1U;
-            break;
-        }
-        if ((g_system_ms - wifi_start) < WIFI_CONNECT_TIMEOUT_MS)
-            wait_ms(800U);
-    } while ((g_system_ms - wifi_start) < WIFI_CONNECT_TIMEOUT_MS);
-
-    if (state->wifi_connected)
-    {
-        printf("[WIFI] connected\r\n");
-        ClockPage_ShowWifiResult(1U);
-        state->sntp_configured = EspAt_ConfigureSntp();
-        if (state->sntp_configured)
-            printf("[SNTP] configured\r\n");
-        else
-            print_esp_failure("SNTP config");
-    }
-    else
-    {
-        printf("[WIFI] timeout\r\n");
-        ClockPage_ShowWifiResult(0U);
-    }
-    wait_ms(3000U);
 }
 
 static void update_wifi(clock_app_state_t *state)
@@ -193,8 +146,6 @@ static void update_network_time(clock_app_state_t *state)
         {
             state->esp_time_synced = 1U;
             state->time_available = 1U;
-            state->rtc_ready = 1U;
-            state->displayed_second = network_time.second;
             ClockUi_PostTime(&network_time);
             printf("[SNTP] RTC updated\r\n");
         }
@@ -274,37 +225,6 @@ static void update_weather(clock_app_state_t *state)
     }
 }
 
-static void update_indoor(clock_app_state_t *state)
-{
-    uint8_t temperature;
-    uint8_t humidity;
-
-    if ((g_system_ms - state->last_dht11_read) < INDOOR_INTERVAL_MS)
-        return;
-
-    state->last_dht11_read = g_system_ms;
-    if (DHT11_Read(&temperature, &humidity))
-        ClockUi_PostIndoor(temperature, humidity);
-}
-
-static void update_rtc(clock_app_state_t *state)
-{
-    weather_rtc_time_t rtc_time;
-
-    if (!state->time_available ||
-        !state->rtc_ready ||
-        (g_system_ms - state->last_rtc_read) < RTC_REFRESH_INTERVAL_MS)
-        return;
-
-    state->last_rtc_read = g_system_ms;
-    WeatherRtc_Get(&rtc_time);
-    if (rtc_time.second != state->displayed_second)
-    {
-        state->displayed_second = rtc_time.second;
-        ClockUi_PostTime(&rtc_time);
-    }
-}
-
 void ClockApp_RunStartupStage(void)
 {
     memset(&rtos_state, 0, sizeof(rtos_state));
@@ -362,9 +282,7 @@ void ClockApp_NetworkTask(void *argument)
     while (!rtos_rtc_ready)
         vTaskDelay(pdMS_TO_TICKS(10U));
 
-    rtos_state.rtc_ready = 1U;
     rtos_state.time_available = rtos_time_available;
-    rtos_state.displayed_second = 0xFFU;
     rtos_state.last_esp_time_try = g_system_ms - TIME_RETRY_INTERVAL_MS;
     rtos_state.last_weather_read = g_system_ms - WEATHER_INTERVAL_MS;
     rtos_state.last_wifi_check = g_system_ms - WIFI_CHECK_INTERVAL_MS;
@@ -402,35 +320,5 @@ void ClockApp_IndoorTask(void *argument)
             ClockUi_PostIndoor(temperature, humidity);
 
         vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(INDOOR_INTERVAL_MS));
-    }
-}
-
-void ClockApp_Run(void)
-{
-    clock_app_state_t state = {0};
-
-    ClockPage_Init();
-    Debug_USART_Config();
-    ClockPage_ShowStartup();
-    EspAt_Init();
-    wait_for_wifi(&state);
-
-    ClockPage_ShowMain(state.wifi_connected ? state.wifi_ssid : NULL);
-    DHT11_Init();
-    state.rtc_ready = WeatherRtc_Init();
-    state.time_available = state.rtc_ready ? WeatherRtc_IsTimeValid() : 0U;
-    state.displayed_second = 0xFFU;
-    state.last_weather_read = g_system_ms - WEATHER_INTERVAL_MS;
-    state.last_esp_time_try = g_system_ms - 7000U;
-    state.last_wifi_check = g_system_ms;
-
-    while (1)
-    {
-        update_wifi(&state);
-        update_network_time(&state);
-        update_weather(&state);
-        update_indoor(&state);
-        update_rtc(&state);
-        vTaskDelay(pdMS_TO_TICKS(10U));
     }
 }
