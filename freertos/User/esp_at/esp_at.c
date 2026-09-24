@@ -3,7 +3,6 @@
 #include "stm32f4xx.h"
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -97,33 +96,31 @@ static uint8_t uart_wait_response(char *response, uint16_t response_size,
 uint8_t EspAt_RequestWeather(esp_weather_t *w)
 {
     char cmd[260], buf[900];
+
+    if (w == NULL)
+        return 0U;
+
     sprintf(cmd, "AT+HTTPCLIENT=2,1,\"https://api.seniverse.com/v3/weather/now.json?key=%s&location=shanghai&language=en&unit=c\",,,2\r\n", WEATHER_API_KEY);
     uart_begin_command(cmd);
-    if (uart_wait_response(buf, sizeof(buf), 8000U)) {
-        char *p = strstr(buf, "\"temperature\":\"");
-        char *c = strstr(buf, "\"code\":\"");
-        if (!p || !c) return 0;
-        w->temperature = (uint8_t)atoi(p + (sizeof("\"temperature\":\"") - 1U));
-        w->code = (uint8_t)atoi(c + (sizeof("\"code\":\"") - 1U));
-        return 1;
-    }
-    return 0;
+    if (!uart_wait_response(buf, sizeof(buf), 8000U))
+        return 0U;
+
+    return WeatherParser_ParseCurrent(buf, w);
 }
 
 uint8_t EspAt_RequestForecast(esp_weather_t *w)
 {
     char cmd[280], buf[900];
+
+    if (w == NULL)
+        return 0U;
+
     sprintf(cmd,"AT+HTTPCLIENT=2,1,\"https://api.seniverse.com/v3/weather/daily.json?key=%s&location=shanghai&language=en&unit=c&start=0&days=1\",,,2\r\n",WEATHER_API_KEY);
     uart_begin_command(cmd);
-    if (uart_wait_response(buf, sizeof(buf), 8000U)) {
-        char *h = strstr(buf, "\"high\":\"");
-        char *l = strstr(buf, "\"low\":\"");
-        if (!h || !l) return 0;
-        w->high = (uint8_t)atoi(h + (sizeof("\"high\":\"") - 1U));
-        w->low = (uint8_t)atoi(l + (sizeof("\"low\":\"") - 1U));
-        return 1;
-    }
-    return 0;
+    if (!uart_wait_response(buf, sizeof(buf), 8000U))
+        return 0U;
+
+    return WeatherParser_ParseForecast(buf, w);
 }
 
 static void uart_puts(const char *s)
