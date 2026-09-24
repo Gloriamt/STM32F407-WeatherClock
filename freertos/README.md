@@ -41,7 +41,8 @@ the queue while waiting for ESP responses. No other task sends ESP-AT commands.
 
 ## Runtime measurements
 
-The application prints a low-frequency `[METRICS]` report every 60 seconds.
+The application prints a low-frequency `[METRICS]` report every 60 seconds,
+including current free heap and the minimum free heap observed since startup.
 Measurements on the target board on 2026-09-24 produced the following maxima
 and minimum remaining stack values:
 
@@ -59,12 +60,15 @@ and minimum remaining stack values:
 | ESP RX queue overflows | 0 |
 | ESP dropped bytes | 0 |
 | ESP parse errors | 0 |
+| Current/minimum free heap | 17000/12776 bytes |
 
 These values are observations from one hardware test session rather than fixed
 limits. They show no current need to replace the ESP byte queue with a ring
 buffer or DMA, so the simpler interrupt-and-queue design is retained. Keep the
 metrics enabled during longer tests and reconsider the RX design if overflow,
-dropped-byte or parser counters increase. Heap usage has not yet been measured.
+dropped-byte or parser counters increase. The 32 KiB heap retained 12776 bytes
+at its observed minimum, so the current task and queue allocations have usable
+headroom.
 
 ## Validation status
 

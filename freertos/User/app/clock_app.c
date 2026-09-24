@@ -130,6 +130,9 @@ static void report_runtime_metrics(void)
            (unsigned long)esp.rx_queue_overflows,
            (unsigned long)esp.rx_dropped_bytes,
            (unsigned long)esp.parse_errors);
+    printf("[METRICS] heap bytes free=%lu minimum=%lu\r\n",
+           (unsigned long)xPortGetFreeHeapSize(),
+           (unsigned long)xPortGetMinimumEverFreeHeapSize());
 }
 
 static void update_wifi(clock_network_state_t *state)
