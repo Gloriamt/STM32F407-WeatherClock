@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "clock_page.h"
 #include "../lcd/bsp_nt35510_lcd.h"
 #include "../lcd/nt35510_image.h"
@@ -99,19 +100,19 @@ static void draw_temperature_placeholder(uint16_t x, uint16_t y,
 }
 
 static void draw_temperature_value(uint16_t x, uint16_t y,
-                                   uint16_t font_size, uint8_t value)
+                                   uint16_t font_size, int16_t value)
 {
-    char value_text[4];
-    uint16_t digit_count;
+    char value_text[5];
+    uint16_t character_count;
     uint16_t degree_radius = font_size / 12U;
 
-    sprintf(value_text, "%u", value);
-    digit_count = (value >= 10U) ? 2U : 1U;
+    sprintf(value_text, "%d", value);
+    character_count = (uint16_t)strlen(value_text);
     draw_text(x, y, font_size, font_size, value_text);
     LCD_SetTextColor(CL_BLACK);
-    NT35510_DrawCircle(x + digit_count * (font_size / 2U) + degree_radius + 2U,
+    NT35510_DrawCircle(x + character_count * (font_size / 2U) + degree_radius + 2U,
                        y + font_size / 4U, degree_radius, 1);
-    draw_text(x + digit_count * (font_size / 2U) + degree_radius * 2U + 6U,
+    draw_text(x + character_count * (font_size / 2U) + degree_radius * 2U + 6U,
               y, font_size, font_size, "C");
 }
 

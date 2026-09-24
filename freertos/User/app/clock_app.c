@@ -172,7 +172,7 @@ static void update_weather(clock_app_state_t *state)
         return;
     }
 
-    printf("[WEATHER] current temperature=%u code=%u\r\n",
+    printf("[WEATHER] current temperature=%d code=%u\r\n",
            weather.temperature, weather.code);
     if (!EspAt_RequestForecast(&weather))
     {
@@ -180,7 +180,7 @@ static void update_weather(clock_app_state_t *state)
         return;
     }
 
-    printf("[WEATHER] forecast high=%u low=%u\r\n",
+    printf("[WEATHER] forecast high=%d low=%d\r\n",
            weather.high, weather.low);
     ClockUi_PostWeather(&weather);
 }
