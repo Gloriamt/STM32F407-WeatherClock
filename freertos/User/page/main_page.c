@@ -385,3 +385,20 @@ void ClockPage_UpdateForecast(int16_t high, int16_t low)
 {
     draw_forecast(high, low);
 }
+
+void ClockPage_UpdateWeatherTime(uint8_t hour, uint8_t minute)
+{
+    char time_text[6];
+
+    sprintf(time_text, "%02u:%02u", hour, minute);
+    LCD_SetColors(CL_WHITE, CL_WHITE);
+    NT35510_Clear(374, 570, 70, 28);
+    LCD_SetColors(CL_BLACK, CL_WHITE);
+    draw_text(380, 574, 20, 20, time_text);
+}
+
+void ClockPage_ClearWeatherTime(void)
+{
+    LCD_SetColors(CL_WHITE, CL_WHITE);
+    NT35510_Clear(374, 570, 70, 28);
+}

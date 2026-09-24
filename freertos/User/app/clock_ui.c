@@ -14,6 +14,8 @@ typedef enum
     CLOCK_UI_INDOOR,
     CLOCK_UI_CURRENT_WEATHER,
     CLOCK_UI_FORECAST,
+    CLOCK_UI_WEATHER_UPDATED_AT,
+    CLOCK_UI_CLEAR_WEATHER_UPDATE_TIME,
     CLOCK_UI_WIFI_NAME,
     CLOCK_UI_CLEAR_WEATHER
 } clock_ui_action_t;
@@ -39,6 +41,11 @@ typedef struct
             int16_t high;
             int16_t low;
         } forecast;
+        struct
+        {
+            uint8_t hour;
+            uint8_t minute;
+        } weather_updated_at;
         char wifi_ssid[33];
     } data;
 } clock_ui_message_t;
@@ -77,6 +84,16 @@ static void clock_ui_task(void *argument)
             {
                 ClockPage_UpdateForecast(message.data.forecast.high,
                                          message.data.forecast.low);
+            }
+            else if (message.action == CLOCK_UI_WEATHER_UPDATED_AT)
+            {
+                ClockPage_UpdateWeatherTime(
+                    message.data.weather_updated_at.hour,
+                    message.data.weather_updated_at.minute);
+            }
+            else if (message.action == CLOCK_UI_CLEAR_WEATHER_UPDATE_TIME)
+            {
+                ClockPage_ClearWeatherTime();
             }
             else if (message.action == CLOCK_UI_WIFI_NAME)
             {
@@ -147,6 +164,24 @@ void ClockUi_PostForecast(int16_t high, int16_t low)
     message.action = CLOCK_UI_FORECAST;
     message.data.forecast.high = high;
     message.data.forecast.low = low;
+    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+}
+
+void ClockUi_PostWeatherUpdatedAt(uint8_t hour, uint8_t minute)
+{
+    clock_ui_message_t message;
+
+    message.action = CLOCK_UI_WEATHER_UPDATED_AT;
+    message.data.weather_updated_at.hour = hour;
+    message.data.weather_updated_at.minute = minute;
+    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+}
+
+void ClockUi_PostClearWeatherUpdateTime(void)
+{
+    clock_ui_message_t message;
+
+    message.action = CLOCK_UI_CLEAR_WEATHER_UPDATE_TIME;
     (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
 }
 

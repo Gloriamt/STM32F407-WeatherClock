@@ -11,6 +11,8 @@ void ClockUi_PostClearTime(void);
 void ClockUi_PostIndoor(uint8_t temperature, uint8_t humidity);
 void ClockUi_PostCurrentWeather(int16_t temperature, uint8_t code);
 void ClockUi_PostForecast(int16_t high, int16_t low);
+void ClockUi_PostWeatherUpdatedAt(uint8_t hour, uint8_t minute);
+void ClockUi_PostClearWeatherUpdateTime(void);
 void ClockUi_PostWifiName(const char *ssid);
 void ClockUi_PostClearWeather(void);
 
