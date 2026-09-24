@@ -13,6 +13,7 @@
 #define WIFI_DISCONNECT_MISSES        2U
 #define TIME_RETRY_INTERVAL_MS   10000U
 #define TIME_SYNC_INTERVAL_MS  3600000U
+#define RTC_INIT_RETRY_INTERVAL_MS 60000U
 #define WEATHER_INTERVAL_MS     60000U
 #define INDOOR_INTERVAL_MS       2000U
 
@@ -173,18 +174,22 @@ static void update_network_time(clock_network_state_t *state)
         return;
     }
 
+    time_state = read_time_state();
+    if (!time_state.rtc_available)
+    {
+        if (!state->time_query_attempted)
+        {
+            printf("[RTC] unavailable; deferring network time query\r\n");
+        }
+        state->time_query_attempted = 1U;
+        state->esp_time_synced = 0U;
+        return;
+    }
+
     state->time_query_attempted = 1U;
     if (EspAt_RequestTime(&network_time))
     {
-        time_state = read_time_state();
-        if (!time_state.rtc_available)
-        {
-            state->esp_time_synced = 0U;
-            publish_time_valid(0U);
-            ClockUi_PostClearTime();
-            printf("[RTC] unavailable; network time not stored\r\n");
-        }
-        else if (WeatherRtc_Set(&network_time))
+        if (WeatherRtc_Set(&network_time))
         {
             state->esp_time_synced = 1U;
             publish_time_valid(1U);
@@ -285,12 +290,14 @@ void ClockApp_TimeTask(void *argument)
     uint8_t rtc_available;
     uint8_t time_valid;
     uint8_t displayed_second = 0xFFU;
+    uint32_t last_rtc_init_try;
 
     (void)argument;
 
     rtc_available = WeatherRtc_Init();
     time_valid = rtc_available ? WeatherRtc_IsTimeValid() : 0U;
     publish_rtc_state(rtc_available, time_valid);
+    last_rtc_init_try = g_system_ms;
     if (!rtc_available)
     {
         printf("[RTC] initialization failed\r\n");
@@ -310,6 +317,23 @@ void ClockApp_TimeTask(void *argument)
     for (;;)
     {
         time_state = read_time_state();
+        if (!time_state.rtc_available &&
+            (g_system_ms - last_rtc_init_try) >= RTC_INIT_RETRY_INTERVAL_MS)
+        {
+            last_rtc_init_try = g_system_ms;
+            rtc_available = WeatherRtc_Init();
+            time_valid = rtc_available ? WeatherRtc_IsTimeValid() : 0U;
+            if (rtc_available)
+            {
+                publish_rtc_state(rtc_available, time_valid);
+                printf("[RTC] initialization recovered\r\n");
+            }
+            else
+            {
+                printf("[RTC] initialization retry failed\r\n");
+            }
+            time_state = read_time_state();
+        }
         if (time_state.rtc_available && time_state.time_valid)
         {
             WeatherRtc_Get(&rtc_time);
