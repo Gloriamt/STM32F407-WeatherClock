@@ -183,9 +183,18 @@ uint8_t WeatherRtc_Set(const weather_rtc_time_t *value)
 {
     RTC_TimeTypeDef rtc_time;
     RTC_DateTypeDef rtc_date;
+    RTC_TimeTypeDef previous_time;
+    RTC_DateTypeDef previous_date;
+    ErrorStatus restore_time_status;
+    ErrorStatus restore_date_status;
+    uint8_t previous_time_valid;
 
     if (!weather_rtc_value_is_valid(value))
         return 0U;
+
+    previous_time_valid = WeatherRtc_IsTimeValid();
+    RTC_GetTime(RTC_Format_BIN, &previous_time);
+    RTC_GetDate(RTC_Format_BIN, &previous_date);
 
     rtc_time.RTC_H12 = RTC_H12_AM;
     rtc_time.RTC_Hours = value->hour;
@@ -199,6 +208,14 @@ uint8_t WeatherRtc_Set(const weather_rtc_time_t *value)
     if (RTC_SetTime(RTC_Format_BIN, &rtc_time) != SUCCESS ||
         RTC_SetDate(RTC_Format_BIN, &rtc_date) != SUCCESS)
     {
+        restore_time_status = RTC_SetTime(RTC_Format_BIN, &previous_time);
+        restore_date_status = RTC_SetDate(RTC_Format_BIN, &previous_date);
+        if (previous_time_valid && restore_time_status == SUCCESS &&
+            restore_date_status == SUCCESS)
+        {
+            RTC_WriteBackupRegister(RTC_BKP_DR1,
+                                    WEATHER_RTC_TIME_VALID_MARKER);
+        }
         return 0U;
     }
 

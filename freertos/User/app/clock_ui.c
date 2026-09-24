@@ -10,6 +10,7 @@
 typedef enum
 {
     CLOCK_UI_TIME,
+    CLOCK_UI_CLEAR_TIME,
     CLOCK_UI_INDOOR,
     CLOCK_UI_CURRENT_WEATHER,
     CLOCK_UI_FORECAST,
@@ -56,6 +57,10 @@ static void clock_ui_task(void *argument)
             if (message.action == CLOCK_UI_TIME)
             {
                 ClockPage_UpdateTime(&message.data.time);
+            }
+            else if (message.action == CLOCK_UI_CLEAR_TIME)
+            {
+                ClockPage_ClearTime();
             }
             else if (message.action == CLOCK_UI_INDOOR)
             {
@@ -104,6 +109,14 @@ void ClockUi_PostTime(const weather_rtc_time_t *time)
 
     message.action = CLOCK_UI_TIME;
     message.data.time = *time;
+    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+}
+
+void ClockUi_PostClearTime(void)
+{
+    clock_ui_message_t message;
+
+    message.action = CLOCK_UI_CLEAR_TIME;
     (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
 }
 
