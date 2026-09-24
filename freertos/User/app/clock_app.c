@@ -23,7 +23,6 @@ typedef struct
     uint8_t wifi_connected;
     uint8_t sntp_configured;
     uint8_t esp_time_synced;
-    uint8_t time_available;
     uint8_t time_query_attempted;
     uint8_t wifi_misses;
     uint8_t current_weather_valid;
@@ -33,15 +32,47 @@ typedef struct
     uint8_t complete_weather_minute;
     char wifi_ssid[33];
     uint32_t last_weather_read;
-    uint32_t current_weather_updated_at;
-    uint32_t forecast_updated_at;
     uint32_t last_wifi_check;
     uint32_t last_esp_time_try;
-} clock_app_state_t;
+} clock_network_state_t;
 
-static clock_app_state_t rtos_state;
-static volatile uint8_t rtos_rtc_ready;
-static volatile uint8_t rtos_time_available;
+typedef struct
+{
+    uint8_t initialization_complete;
+    uint8_t rtc_available;
+    uint8_t time_valid;
+} clock_time_state_t;
+
+/* NetworkTask owns network_state after the startup task clears it. */
+static clock_network_state_t network_state;
+/* TimeTask and NetworkTask access this state through the helpers below. */
+static clock_time_state_t shared_time_state;
+
+static clock_time_state_t read_time_state(void)
+{
+    clock_time_state_t snapshot;
+
+    taskENTER_CRITICAL();
+    snapshot = shared_time_state;
+    taskEXIT_CRITICAL();
+    return snapshot;
+}
+
+static void publish_rtc_state(uint8_t rtc_available, uint8_t time_valid)
+{
+    taskENTER_CRITICAL();
+    shared_time_state.rtc_available = rtc_available;
+    shared_time_state.time_valid = time_valid;
+    shared_time_state.initialization_complete = 1U;
+    taskEXIT_CRITICAL();
+}
+
+static void publish_time_valid(uint8_t time_valid)
+{
+    taskENTER_CRITICAL();
+    shared_time_state.time_valid = time_valid;
+    taskEXIT_CRITICAL();
+}
 
 static void print_esp_failure(const char *operation)
 {
@@ -60,9 +91,10 @@ static void print_esp_failure(const char *operation)
            (unsigned long)diagnostics.parse_errors);
 }
 
-static void update_wifi(clock_app_state_t *state)
+static void update_wifi(clock_network_state_t *state)
 {
     char observed_ssid[33];
+    clock_time_state_t time_state;
     weather_rtc_time_t offline_time;
 
     if ((g_system_ms - state->last_wifi_check) < WIFI_CHECK_INTERVAL_MS)
@@ -101,7 +133,8 @@ static void update_wifi(clock_app_state_t *state)
             ClockUi_PostWeatherUpdatedAt(state->complete_weather_hour,
                                          state->complete_weather_minute);
         }
-        if (state->time_available)
+        time_state = read_time_state();
+        if (time_state.time_valid)
         {
             WeatherRtc_Get(&offline_time);
             printf("[RTC] offline time %02u-%02u-%02u %02u:%02u:%02u\r\n",
@@ -113,8 +146,9 @@ static void update_wifi(clock_app_state_t *state)
     }
 }
 
-static void update_network_time(clock_app_state_t *state)
+static void update_network_time(clock_network_state_t *state)
 {
+    clock_time_state_t time_state;
     weather_rtc_time_t network_time;
     uint32_t sync_interval;
 
@@ -142,19 +176,27 @@ static void update_network_time(clock_app_state_t *state)
     state->time_query_attempted = 1U;
     if (EspAt_RequestTime(&network_time))
     {
-        if (WeatherRtc_Set(&network_time))
+        time_state = read_time_state();
+        if (!time_state.rtc_available)
+        {
+            state->esp_time_synced = 0U;
+            publish_time_valid(0U);
+            ClockUi_PostClearTime();
+            printf("[RTC] unavailable; network time not stored\r\n");
+        }
+        else if (WeatherRtc_Set(&network_time))
         {
             state->esp_time_synced = 1U;
-            state->time_available = 1U;
+            publish_time_valid(1U);
             ClockUi_PostTime(&network_time);
             printf("[SNTP] RTC updated\r\n");
         }
         else
         {
             state->esp_time_synced = 0U;
-            state->time_available = WeatherRtc_IsTimeValid();
-            rtos_time_available = state->time_available;
-            if (state->time_available)
+            time_state.time_valid = WeatherRtc_IsTimeValid();
+            publish_time_valid(time_state.time_valid);
+            if (time_state.time_valid)
             {
                 printf("[RTC] update failed; previous time restored\r\n");
             }
@@ -173,8 +215,9 @@ static void update_network_time(clock_app_state_t *state)
     }
 }
 
-static void update_weather(clock_app_state_t *state)
+static void update_weather(clock_network_state_t *state)
 {
+    clock_time_state_t time_state;
     esp_weather_t weather;
     weather_rtc_time_t updated_time;
     uint8_t current_updated = 0U;
@@ -188,7 +231,6 @@ static void update_weather(clock_app_state_t *state)
     if (EspAt_RequestWeather(&weather))
     {
         state->current_weather_valid = 1U;
-        state->current_weather_updated_at = g_system_ms;
         current_updated = 1U;
         ClockUi_PostCurrentWeather(weather.temperature, weather.code);
         printf("[WEATHER] current temperature=%d code=%u\r\n",
@@ -203,7 +245,6 @@ static void update_weather(clock_app_state_t *state)
     if (EspAt_RequestForecast(&weather))
     {
         state->forecast_valid = 1U;
-        state->forecast_updated_at = g_system_ms;
         forecast_updated = 1U;
         ClockUi_PostForecast(weather.high, weather.low);
         printf("[WEATHER] forecast high=%d low=%d\r\n",
@@ -215,7 +256,8 @@ static void update_weather(clock_app_state_t *state)
         printf("[WEATHER] forecast request failed; keeping previous data\r\n");
     }
 
-    if (current_updated && forecast_updated && state->time_available)
+    time_state = read_time_state();
+    if (current_updated && forecast_updated && time_state.time_valid)
     {
         WeatherRtc_Get(&updated_time);
         state->complete_weather_hour = updated_time.hour;
@@ -227,7 +269,8 @@ static void update_weather(clock_app_state_t *state)
 
 void ClockApp_RunStartupStage(void)
 {
-    memset(&rtos_state, 0, sizeof(rtos_state));
+    memset(&network_state, 0, sizeof(network_state));
+    memset(&shared_time_state, 0, sizeof(shared_time_state));
 
     ClockPage_Init();
     ClockPage_ShowMain(NULL);
@@ -237,18 +280,22 @@ void ClockApp_RunStartupStage(void)
 
 void ClockApp_TimeTask(void *argument)
 {
+    clock_time_state_t time_state;
     weather_rtc_time_t rtc_time;
-    uint8_t rtc_ready;
+    uint8_t rtc_available;
     uint8_t time_valid;
     uint8_t displayed_second = 0xFFU;
 
     (void)argument;
 
-    rtc_ready = WeatherRtc_Init();
-    time_valid = rtc_ready ? WeatherRtc_IsTimeValid() : 0U;
-    rtos_time_available = time_valid;
-    rtos_rtc_ready = rtc_ready;
-    if (time_valid)
+    rtc_available = WeatherRtc_Init();
+    time_valid = rtc_available ? WeatherRtc_IsTimeValid() : 0U;
+    publish_rtc_state(rtc_available, time_valid);
+    if (!rtc_available)
+    {
+        printf("[RTC] initialization failed\r\n");
+    }
+    else if (time_valid)
     {
         WeatherRtc_Get(&rtc_time);
         printf("[RTC] valid saved time %02u-%02u-%02u %02u:%02u:%02u\r\n",
@@ -262,7 +309,8 @@ void ClockApp_TimeTask(void *argument)
 
     for (;;)
     {
-        if (rtos_rtc_ready && rtos_time_available)
+        time_state = read_time_state();
+        if (time_state.rtc_available && time_state.time_valid)
         {
             WeatherRtc_Get(&rtc_time);
             if (rtc_time.second != displayed_second)
@@ -277,23 +325,26 @@ void ClockApp_TimeTask(void *argument)
 
 void ClockApp_NetworkTask(void *argument)
 {
+    clock_time_state_t time_state;
+
     (void)argument;
 
-    while (!rtos_rtc_ready)
-        vTaskDelay(pdMS_TO_TICKS(10U));
+    do
+    {
+        time_state = read_time_state();
+        if (!time_state.initialization_complete)
+            vTaskDelay(pdMS_TO_TICKS(10U));
+    } while (!time_state.initialization_complete);
 
-    rtos_state.time_available = rtos_time_available;
-    rtos_state.last_esp_time_try = g_system_ms - TIME_RETRY_INTERVAL_MS;
-    rtos_state.last_weather_read = g_system_ms - WEATHER_INTERVAL_MS;
-    rtos_state.last_wifi_check = g_system_ms - WIFI_CHECK_INTERVAL_MS;
+    network_state.last_esp_time_try = g_system_ms - TIME_RETRY_INTERVAL_MS;
+    network_state.last_weather_read = g_system_ms - WEATHER_INTERVAL_MS;
+    network_state.last_wifi_check = g_system_ms - WIFI_CHECK_INTERVAL_MS;
 
     for (;;)
     {
-        update_wifi(&rtos_state);
-        update_network_time(&rtos_state);
-        if (rtos_state.time_available)
-            rtos_time_available = 1U;
-        update_weather(&rtos_state);
+        update_wifi(&network_state);
+        update_network_time(&network_state);
+        update_weather(&network_state);
         vTaskDelay(pdMS_TO_TICKS(50U));
     }
 }
