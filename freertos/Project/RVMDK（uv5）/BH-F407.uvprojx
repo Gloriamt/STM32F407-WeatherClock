@@ -773,11 +773,6 @@
               <FilePath>..\..\User\app\clock_app.c</FilePath>
             </File>
             <File>
-              <FileName>startup_page.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\page\startup_page.c</FilePath>
-            </File>
-            <File>
               <FileName>main_page.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\page\main_page.c</FilePath>

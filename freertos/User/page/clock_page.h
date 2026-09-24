@@ -2,11 +2,8 @@
 #define WEATHER_CLOCK_PAGE_H
 
 #include "../rtc/weather_rtc.h"
-#include "../esp_at/esp_at.h"
 
 void ClockPage_Init(void);
-void ClockPage_ShowStartup(void);
-void ClockPage_ShowWifiResult(uint8_t connected);
 void ClockPage_ShowMain(const char *wifi_ssid);
 void ClockPage_UpdateWifiName(const char *wifi_ssid);
 void ClockPage_ClearWeather(void);

@@ -363,6 +363,12 @@ static void draw_forecast(int16_t high, int16_t low)
     draw_temperature_value(220, 720, 20, low);
 }
 
+void ClockPage_Init(void)
+{
+    NT35510_Init();
+    NT35510_GramScan(0);
+}
+
 void ClockPage_ShowMain(const char *wifi_ssid)
 {
     draw_static_ui(wifi_ssid);
