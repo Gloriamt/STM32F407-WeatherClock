@@ -353,6 +353,19 @@ void ClockPage_ClearWeather(void)
     draw_text(354, 720, 20, 20, "-");
 }
 
+void ClockPage_ClearTime(void)
+{
+    LCD_SetColors(CL_WHITE, CL_WHITE);
+    NT35510_Clear(112, 104, 258, 104);
+    NT35510_Clear(116, 220, 258, 34);
+
+    LCD_SetColors(CL_BLACK, CL_WHITE);
+    draw_text(120, 112, 96, 96, "--:--");
+    draw_text(121, 226, 24, 24, "----/--/--");
+    draw_chinese24(286, 226, text_week, 2);
+    draw_text(334, 226, 24, 24, "-");
+}
+
 void ClockPage_UpdateTime(const weather_rtc_time_t *time)
 {
     draw_rtc_values(time);

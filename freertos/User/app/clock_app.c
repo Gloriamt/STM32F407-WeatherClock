@@ -191,7 +191,17 @@ static void update_network_time(clock_app_state_t *state)
         else
         {
             state->esp_time_synced = 0U;
-            printf("[RTC] rejected parsed network time\r\n");
+            state->time_available = WeatherRtc_IsTimeValid();
+            rtos_time_available = state->time_available;
+            if (state->time_available)
+            {
+                printf("[RTC] update failed; previous time restored\r\n");
+            }
+            else
+            {
+                ClockUi_PostClearTime();
+                printf("[RTC] update and recovery failed; time invalid\r\n");
+            }
         }
     }
     else
