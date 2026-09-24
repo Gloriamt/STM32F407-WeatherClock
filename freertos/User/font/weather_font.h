@@ -8,7 +8,8 @@
 #define WEATHER_FONT_24_HEIGHT          24U
 #define WEATHER_FONT_20_BYTES_PER_GLYPH 60U
 #define WEATHER_FONT_24_BYTES_PER_GLYPH 72U
-#define WEATHER_FONT_GLYPH_COUNT       49U
+#define WEATHER_FONT_20_GLYPH_COUNT    51U
+#define WEATHER_FONT_24_GLYPH_COUNT    49U
 
 enum
 {
@@ -21,6 +22,8 @@ enum
     WEATHER_GLYPH_MIXED = 44, WEATHER_GLYPH_HAZE = 45,
     WEATHER_GLYPH_SAND = 46, WEATHER_GLYPH_DUST = 47,
     WEATHER_GLYPH_WIND = 48,
+    WEATHER_GLYPH_UPDATE = 49,
+    WEATHER_GLYPH_NEW = 50,
     WEATHER_GLYPH_SHANG = 12,
     WEATHER_GLYPH_HAI = 13,
     WEATHER_GLYPH_CITY = 14,
@@ -36,9 +39,9 @@ enum
     WEATHER_GLYPH_TIME = 40, WEATHER_GLYPH_CLOCK = 41
 };
 
-extern const uint8_t weather_font_24x20[WEATHER_FONT_GLYPH_COUNT]
+extern const uint8_t weather_font_24x20[WEATHER_FONT_20_GLYPH_COUNT]
                                      [WEATHER_FONT_20_BYTES_PER_GLYPH];
-extern const uint8_t weather_font_24x24[WEATHER_FONT_GLYPH_COUNT]
+extern const uint8_t weather_font_24x24[WEATHER_FONT_24_GLYPH_COUNT]
                                      [WEATHER_FONT_24_BYTES_PER_GLYPH];
 
 void WeatherFont_DrawText20(uint16_t x, uint16_t y, const uint8_t *glyphs,
