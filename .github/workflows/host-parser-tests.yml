@@ -1,0 +1,32 @@
+name: Host parser tests
+
+on:
+  pull_request:
+    paths:
+      - "freertos/User/esp_at/at_response.c"
+      - "freertos/User/esp_at/at_response.h"
+      - "freertos/User/esp_at/weather_parser.c"
+      - "freertos/User/esp_at/weather_parser.h"
+      - "freertos/tests/**"
+      - ".github/workflows/host-parser-tests.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "freertos/User/esp_at/at_response.c"
+      - "freertos/User/esp_at/at_response.h"
+      - "freertos/User/esp_at/weather_parser.c"
+      - "freertos/User/esp_at/weather_parser.h"
+      - "freertos/tests/**"
+      - ".github/workflows/host-parser-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run host parser tests
+        run: sh freertos/tests/run_tests.sh
