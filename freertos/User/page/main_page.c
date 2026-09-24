@@ -9,6 +9,29 @@
 #define PAGE_BACKGROUND_RGB565  0xD73EU
 #define WEATHER_PLACEHOLDER_RGB565  0x9CF4U
 
+static uint8_t rtc_time_drawn;
+static uint8_t rtc_date_drawn;
+static uint8_t drawn_hour;
+static uint8_t drawn_minute;
+static uint8_t drawn_year;
+static uint8_t drawn_month;
+static uint8_t drawn_day;
+static uint8_t drawn_weekday;
+static uint8_t indoor_drawn;
+static uint8_t drawn_indoor_temperature;
+static uint8_t drawn_indoor_humidity;
+static uint8_t current_weather_drawn;
+static int16_t drawn_current_temperature;
+static uint8_t drawn_weather_code;
+static uint8_t forecast_drawn;
+static int16_t drawn_forecast_high;
+static int16_t drawn_forecast_low;
+static uint8_t weather_time_drawn;
+static uint8_t drawn_weather_hour;
+static uint8_t drawn_weather_minute;
+static uint8_t wifi_name_drawn;
+static char drawn_wifi_name[33];
+
 static const uint8_t text_indoor[] = {
     WEATHER_GLYPH_ROOM, WEATHER_GLYPH_INDOOR
 };
@@ -133,25 +156,31 @@ static void draw_indoor_values(uint8_t temperature, uint8_t humidity)
     draw_text(316, 412, 50, 50, humidity_text);
 }
 
-static void draw_rtc_values(const weather_rtc_time_t *time)
+static void draw_rtc_time(const weather_rtc_time_t *time)
 {
     char time_text[6];
+
+    sprintf(time_text, "%02u:%02u", time->hour, time->minute);
+    LCD_SetColors(CL_WHITE, CL_WHITE);
+    NT35510_Clear(112, 104, 258, 104);
+    LCD_SetColors(CL_BLACK, CL_WHITE);
+    draw_text(120, 112, 96, 96, time_text);
+}
+
+static void draw_rtc_date(const weather_rtc_time_t *time)
+{
     char date_text[11];
     uint8_t weekday_index;
 
-    sprintf(time_text, "%02u:%02u", time->hour, time->minute);
     sprintf(date_text, "20%02u/%02u/%02u", time->year, time->month, time->day);
     weekday_index = (time->weekday >= RTC_Weekday_Monday) &&
                     (time->weekday <= RTC_Weekday_Sunday) ?
                     (uint8_t)(time->weekday - RTC_Weekday_Monday) : 0U;
 
     LCD_SetColors(CL_WHITE, CL_WHITE);
-    NT35510_Clear(112, 104, 258, 104);
     NT35510_Clear(116, 220, 152, 34);
     NT35510_Clear(282, 220, 92, 34);
-
     LCD_SetColors(CL_BLACK, CL_WHITE);
-    draw_text(120, 112, 96, 96, time_text);
     draw_text(121, 226, 24, 24, date_text);
     draw_chinese24(286, 226, text_weekday[weekday_index], 3);
 }
@@ -223,6 +252,17 @@ static void draw_static_ui(const char *wifi_ssid)
     draw_chinese20(176, 720, text_low, 2);
     draw_temperature_placeholder(220, 720, 20);
     draw_text(354, 720, 20, 20, "-");
+}
+
+static void invalidate_dynamic_cache(void)
+{
+    rtc_time_drawn = 0U;
+    rtc_date_drawn = 0U;
+    indoor_drawn = 0U;
+    current_weather_drawn = 0U;
+    forecast_drawn = 0U;
+    weather_time_drawn = 0U;
+    wifi_name_drawn = 0U;
 }
 
 static const weather_icon_t *weather_icon_for_code(uint8_t code,
@@ -326,17 +366,29 @@ static void draw_forecast(int16_t high, int16_t low)
 void ClockPage_ShowMain(const char *wifi_ssid)
 {
     draw_static_ui(wifi_ssid);
+    invalidate_dynamic_cache();
 }
 
 void ClockPage_UpdateWifiName(const char *wifi_ssid)
 {
+    const char *normalized_ssid = (wifi_ssid != NULL) ? wifi_ssid : "";
+
+    if (wifi_name_drawn && strcmp(drawn_wifi_name, normalized_ssid) == 0)
+        return;
+
     LCD_SetColors(CL_WHITE, CL_WHITE);
     NT35510_Clear(286, 36, 164, 36);
     draw_wifi_name(wifi_ssid);
+    strncpy(drawn_wifi_name, normalized_ssid, sizeof(drawn_wifi_name) - 1U);
+    drawn_wifi_name[sizeof(drawn_wifi_name) - 1U] = 0;
+    wifi_name_drawn = 1U;
 }
 
 void ClockPage_ClearWeather(void)
 {
+    if (!current_weather_drawn && !forecast_drawn)
+        return;
+
     LCD_SetColors(CL_WHITE, CL_WHITE);
     NT35510_Clear(58, 620, 190, 82);
     NT35510_Clear(108, 716, 64, 28);
@@ -354,10 +406,15 @@ void ClockPage_ClearWeather(void)
     NT35510_DrawRectangle(306, 590, 110, 110, 1);
     LCD_SetColors(CL_BLACK, CL_WHITE);
     draw_text(354, 720, 20, 20, "-");
+    current_weather_drawn = 0U;
+    forecast_drawn = 0U;
 }
 
 void ClockPage_ClearTime(void)
 {
+    if (!rtc_time_drawn && !rtc_date_drawn)
+        return;
+
     LCD_SetColors(CL_WHITE, CL_WHITE);
     NT35510_Clear(112, 104, 258, 104);
     NT35510_Clear(116, 220, 258, 34);
@@ -367,31 +424,84 @@ void ClockPage_ClearTime(void)
     draw_text(121, 226, 24, 24, "----/--/--");
     draw_chinese24(286, 226, text_week, 2);
     draw_text(334, 226, 24, 24, "-");
+    rtc_time_drawn = 0U;
+    rtc_date_drawn = 0U;
 }
 
 void ClockPage_UpdateTime(const weather_rtc_time_t *time)
 {
-    draw_rtc_values(time);
+    if (!rtc_time_drawn ||
+        time->hour != drawn_hour ||
+        time->minute != drawn_minute)
+    {
+        draw_rtc_time(time);
+        drawn_hour = time->hour;
+        drawn_minute = time->minute;
+        rtc_time_drawn = 1U;
+    }
+
+    if (!rtc_date_drawn ||
+        time->year != drawn_year ||
+        time->month != drawn_month ||
+        time->day != drawn_day ||
+        time->weekday != drawn_weekday)
+    {
+        draw_rtc_date(time);
+        drawn_year = time->year;
+        drawn_month = time->month;
+        drawn_day = time->day;
+        drawn_weekday = time->weekday;
+        rtc_date_drawn = 1U;
+    }
 }
 
 void ClockPage_UpdateIndoor(uint8_t temperature, uint8_t humidity)
 {
+    if (indoor_drawn &&
+        temperature == drawn_indoor_temperature &&
+        humidity == drawn_indoor_humidity)
+        return;
+
     draw_indoor_values(temperature, humidity);
+    drawn_indoor_temperature = temperature;
+    drawn_indoor_humidity = humidity;
+    indoor_drawn = 1U;
 }
 
 void ClockPage_UpdateCurrentWeather(int16_t temperature, uint8_t code)
 {
+    if (current_weather_drawn &&
+        temperature == drawn_current_temperature &&
+        code == drawn_weather_code)
+        return;
+
     draw_current_weather(temperature, code);
+    drawn_current_temperature = temperature;
+    drawn_weather_code = code;
+    current_weather_drawn = 1U;
 }
 
 void ClockPage_UpdateForecast(int16_t high, int16_t low)
 {
+    if (forecast_drawn &&
+        high == drawn_forecast_high &&
+        low == drawn_forecast_low)
+        return;
+
     draw_forecast(high, low);
+    drawn_forecast_high = high;
+    drawn_forecast_low = low;
+    forecast_drawn = 1U;
 }
 
 void ClockPage_UpdateWeatherTime(uint8_t hour, uint8_t minute)
 {
     char time_text[6];
+
+    if (weather_time_drawn &&
+        hour == drawn_weather_hour &&
+        minute == drawn_weather_minute)
+        return;
 
     sprintf(time_text, "%02u:%02u", hour, minute);
     LCD_SetColors(CL_WHITE, CL_WHITE);
@@ -399,10 +509,17 @@ void ClockPage_UpdateWeatherTime(uint8_t hour, uint8_t minute)
     LCD_SetColors(CL_BLACK, CL_WHITE);
     draw_text(338, 574, 20, 20, time_text);
     draw_chinese20(390, 574, text_update, 2U);
+    drawn_weather_hour = hour;
+    drawn_weather_minute = minute;
+    weather_time_drawn = 1U;
 }
 
 void ClockPage_ClearWeatherTime(void)
 {
+    if (!weather_time_drawn)
+        return;
+
     LCD_SetColors(CL_WHITE, CL_WHITE);
     NT35510_Clear(334, 570, 114, 28);
+    weather_time_drawn = 0U;
 }
