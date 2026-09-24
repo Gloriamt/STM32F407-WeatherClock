@@ -13,7 +13,7 @@ static void app_init_task(void *argument)
 {
     (void)argument;
 
-    (void)ClockApp_RunStartupStage();
+    ClockApp_RunStartupStage();
     if (xTaskCreate(ClockApp_TimeTask, "time", 512U, NULL, 1U, NULL) != pdPASS)
     {
         printf("[RTOS] time task creation failed\r\n");

@@ -42,6 +42,9 @@ static const uint8_t text_fog[] = { WEATHER_GLYPH_FOG };
 static const uint8_t text_haze[] = { WEATHER_GLYPH_HAZE };
 static const uint8_t text_wind[] = { WEATHER_GLYPH_WIND };
 static const uint8_t text_gale[] = { WEATHER_GLYPH_BIG, WEATHER_GLYPH_WIND };
+static const uint8_t text_update[] = {
+    WEATHER_GLYPH_UPDATE, WEATHER_GLYPH_NEW
+};
 static const uint8_t text_week[] = {
     WEATHER_GLYPH_WEEK, WEATHER_GLYPH_PERIOD
 };
@@ -384,4 +387,22 @@ void ClockPage_UpdateCurrentWeather(int16_t temperature, uint8_t code)
 void ClockPage_UpdateForecast(int16_t high, int16_t low)
 {
     draw_forecast(high, low);
+}
+
+void ClockPage_UpdateWeatherTime(uint8_t hour, uint8_t minute)
+{
+    char time_text[6];
+
+    sprintf(time_text, "%02u:%02u", hour, minute);
+    LCD_SetColors(CL_WHITE, CL_WHITE);
+    NT35510_Clear(334, 570, 114, 28);
+    LCD_SetColors(CL_BLACK, CL_WHITE);
+    draw_text(338, 574, 20, 20, time_text);
+    draw_chinese20(390, 574, text_update, 2U);
+}
+
+void ClockPage_ClearWeatherTime(void)
+{
+    LCD_SetColors(CL_WHITE, CL_WHITE);
+    NT35510_Clear(334, 570, 114, 28);
 }

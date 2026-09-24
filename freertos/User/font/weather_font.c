@@ -3,7 +3,7 @@
 
 static void weather_font_draw(uint16_t x, uint16_t y, const uint8_t *glyphs,
                               uint16_t count, uint16_t glyph_height,
-                              const uint8_t *font_data,
+                              uint16_t glyph_count, const uint8_t *font_data,
                               uint16_t text_color, uint16_t back_color)
 {
     uint16_t row;
@@ -33,7 +33,7 @@ static void weather_font_draw(uint16_t x, uint16_t y, const uint8_t *glyphs,
         {
             const uint8_t *glyph = 0;
 
-            if (glyphs[glyph_index] < WEATHER_FONT_GLYPH_COUNT)
+            if (glyphs[glyph_index] < glyph_count)
             {
                 glyph = font_data + (uint32_t)glyphs[glyph_index] *
                         glyph_height * 3U;
@@ -61,6 +61,7 @@ void WeatherFont_DrawText20(uint16_t x, uint16_t y, const uint8_t *glyphs,
                             uint16_t back_color)
 {
     weather_font_draw(x, y, glyphs, count, WEATHER_FONT_20_HEIGHT,
+                      WEATHER_FONT_20_GLYPH_COUNT,
                       &weather_font_24x20[0][0], text_color, back_color);
 }
 
@@ -69,5 +70,6 @@ void WeatherFont_DrawText24(uint16_t x, uint16_t y, const uint8_t *glyphs,
                             uint16_t back_color)
 {
     weather_font_draw(x, y, glyphs, count, WEATHER_FONT_24_HEIGHT,
+                      WEATHER_FONT_24_GLYPH_COUNT,
                       &weather_font_24x24[0][0], text_color, back_color);
 }

@@ -34,6 +34,9 @@ typedef struct
     uint8_t displayed_second;
     uint8_t current_weather_valid;
     uint8_t forecast_valid;
+    uint8_t complete_weather_time_valid;
+    uint8_t complete_weather_hour;
+    uint8_t complete_weather_minute;
     char wifi_ssid[33];
     uint32_t last_weather_read;
     uint32_t current_weather_updated_at;
@@ -107,6 +110,7 @@ static void wait_for_wifi(clock_app_state_t *state)
 static void update_wifi(clock_app_state_t *state)
 {
     char observed_ssid[33];
+    weather_rtc_time_t offline_time;
 
     if ((g_system_ms - state->last_wifi_check) < WIFI_CHECK_INTERVAL_MS)
         return;
@@ -117,12 +121,6 @@ static void update_wifi(clock_app_state_t *state)
         state->wifi_misses = 0U;
         if (!state->wifi_connected || strcmp(state->wifi_ssid, observed_ssid) != 0)
         {
-            if (state->wifi_connected)
-            {
-                ClockUi_PostClearWeather();
-                state->current_weather_valid = 0U;
-                state->forecast_valid = 0U;
-            }
             strcpy(state->wifi_ssid, observed_ssid);
             state->wifi_connected = 1U;
             state->sntp_configured = 0U;
@@ -142,10 +140,22 @@ static void update_wifi(clock_app_state_t *state)
         state->esp_time_synced = 0U;
         state->time_query_attempted = 0U;
         state->wifi_misses = 0U;
-        state->current_weather_valid = 0U;
-        state->forecast_valid = 0U;
         ClockUi_PostWifiName(NULL);
-        ClockUi_PostClearWeather();
+        if (state->current_weather_valid || state->forecast_valid)
+            printf("[WEATHER] offline; keeping last successful data\r\n");
+        if (state->complete_weather_time_valid)
+        {
+            ClockUi_PostWeatherUpdatedAt(state->complete_weather_hour,
+                                         state->complete_weather_minute);
+        }
+        if (state->time_available)
+        {
+            WeatherRtc_Get(&offline_time);
+            printf("[RTC] offline time %02u-%02u-%02u %02u:%02u:%02u\r\n",
+                   offline_time.year, offline_time.month, offline_time.day,
+                   offline_time.hour, offline_time.minute,
+                   offline_time.second);
+        }
         printf("[WIFI] disconnected\r\n");
     }
 }
@@ -215,6 +225,9 @@ static void update_network_time(clock_app_state_t *state)
 static void update_weather(clock_app_state_t *state)
 {
     esp_weather_t weather;
+    weather_rtc_time_t updated_time;
+    uint8_t current_updated = 0U;
+    uint8_t forecast_updated = 0U;
 
     if (!state->wifi_connected || !state->time_query_attempted ||
         (g_system_ms - state->last_weather_read) < WEATHER_INTERVAL_MS)
@@ -225,6 +238,7 @@ static void update_weather(clock_app_state_t *state)
     {
         state->current_weather_valid = 1U;
         state->current_weather_updated_at = g_system_ms;
+        current_updated = 1U;
         ClockUi_PostCurrentWeather(weather.temperature, weather.code);
         printf("[WEATHER] current temperature=%d code=%u\r\n",
                weather.temperature, weather.code);
@@ -239,6 +253,7 @@ static void update_weather(clock_app_state_t *state)
     {
         state->forecast_valid = 1U;
         state->forecast_updated_at = g_system_ms;
+        forecast_updated = 1U;
         ClockUi_PostForecast(weather.high, weather.low);
         printf("[WEATHER] forecast high=%d low=%d\r\n",
                weather.high, weather.low);
@@ -247,6 +262,15 @@ static void update_weather(clock_app_state_t *state)
     {
         print_esp_failure("forecast");
         printf("[WEATHER] forecast request failed; keeping previous data\r\n");
+    }
+
+    if (current_updated && forecast_updated && state->time_available)
+    {
+        WeatherRtc_Get(&updated_time);
+        state->complete_weather_hour = updated_time.hour;
+        state->complete_weather_minute = updated_time.minute;
+        state->complete_weather_time_valid = 1U;
+        ClockUi_PostClearWeatherUpdateTime();
     }
 }
 
@@ -281,19 +305,14 @@ static void update_rtc(clock_app_state_t *state)
     }
 }
 
-uint8_t ClockApp_RunStartupStage(void)
+void ClockApp_RunStartupStage(void)
 {
     memset(&rtos_state, 0, sizeof(rtos_state));
 
     ClockPage_Init();
-    ClockPage_ShowStartup();
+    ClockPage_ShowMain(NULL);
     EspAt_Init();
-    wait_for_wifi(&rtos_state);
-    ClockPage_ShowMain(rtos_state.wifi_connected ? rtos_state.wifi_ssid : NULL);
-    printf(rtos_state.wifi_connected ?
-           "[RTOS] startup stage complete; Wi-Fi connected\r\n" :
-           "[RTOS] startup stage complete; Wi-Fi unavailable\r\n");
-    return rtos_state.wifi_connected;
+    printf("[RTOS] main page ready; Wi-Fi connecting in background\r\n");
 }
 
 void ClockApp_TimeTask(void *argument)
@@ -309,8 +328,17 @@ void ClockApp_TimeTask(void *argument)
     time_valid = rtc_ready ? WeatherRtc_IsTimeValid() : 0U;
     rtos_time_available = time_valid;
     rtos_rtc_ready = rtc_ready;
-    printf(time_valid ? "[RTC] valid saved time available\r\n" :
-                        "[RTC] waiting for first valid network time\r\n");
+    if (time_valid)
+    {
+        WeatherRtc_Get(&rtc_time);
+        printf("[RTC] valid saved time %02u-%02u-%02u %02u:%02u:%02u\r\n",
+               rtc_time.year, rtc_time.month, rtc_time.day,
+               rtc_time.hour, rtc_time.minute, rtc_time.second);
+    }
+    else
+    {
+        printf("[RTC] waiting for first valid network time\r\n");
+    }
 
     for (;;)
     {
@@ -339,7 +367,7 @@ void ClockApp_NetworkTask(void *argument)
     rtos_state.displayed_second = 0xFFU;
     rtos_state.last_esp_time_try = g_system_ms - TIME_RETRY_INTERVAL_MS;
     rtos_state.last_weather_read = g_system_ms - WEATHER_INTERVAL_MS;
-    rtos_state.last_wifi_check = g_system_ms;
+    rtos_state.last_wifi_check = g_system_ms - WIFI_CHECK_INTERVAL_MS;
 
     for (;;)
     {
