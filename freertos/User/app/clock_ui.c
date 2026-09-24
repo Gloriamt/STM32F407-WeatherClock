@@ -11,7 +11,8 @@ typedef enum
 {
     CLOCK_UI_TIME,
     CLOCK_UI_INDOOR,
-    CLOCK_UI_WEATHER,
+    CLOCK_UI_CURRENT_WEATHER,
+    CLOCK_UI_FORECAST,
     CLOCK_UI_WIFI_NAME,
     CLOCK_UI_CLEAR_WEATHER
 } clock_ui_action_t;
@@ -27,7 +28,16 @@ typedef struct
             uint8_t temperature;
             uint8_t humidity;
         } indoor;
-        esp_weather_t weather;
+        struct
+        {
+            int16_t temperature;
+            uint8_t code;
+        } current_weather;
+        struct
+        {
+            int16_t high;
+            int16_t low;
+        } forecast;
         char wifi_ssid[33];
     } data;
 } clock_ui_message_t;
@@ -52,9 +62,16 @@ static void clock_ui_task(void *argument)
                 ClockPage_UpdateIndoor(message.data.indoor.temperature,
                                        message.data.indoor.humidity);
             }
-            else if (message.action == CLOCK_UI_WEATHER)
+            else if (message.action == CLOCK_UI_CURRENT_WEATHER)
             {
-                ClockPage_UpdateWeather(&message.data.weather);
+                ClockPage_UpdateCurrentWeather(
+                    message.data.current_weather.temperature,
+                    message.data.current_weather.code);
+            }
+            else if (message.action == CLOCK_UI_FORECAST)
+            {
+                ClockPage_UpdateForecast(message.data.forecast.high,
+                                         message.data.forecast.low);
             }
             else if (message.action == CLOCK_UI_WIFI_NAME)
             {
@@ -100,12 +117,23 @@ void ClockUi_PostIndoor(uint8_t temperature, uint8_t humidity)
     (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
 }
 
-void ClockUi_PostWeather(const esp_weather_t *weather)
+void ClockUi_PostCurrentWeather(int16_t temperature, uint8_t code)
 {
     clock_ui_message_t message;
 
-    message.action = CLOCK_UI_WEATHER;
-    message.data.weather = *weather;
+    message.action = CLOCK_UI_CURRENT_WEATHER;
+    message.data.current_weather.temperature = temperature;
+    message.data.current_weather.code = code;
+    (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
+}
+
+void ClockUi_PostForecast(int16_t high, int16_t low)
+{
+    clock_ui_message_t message;
+
+    message.action = CLOCK_UI_FORECAST;
+    message.data.forecast.high = high;
+    message.data.forecast.low = low;
     (void)xQueueSend(ui_queue, &message, portMAX_DELAY);
 }
 
