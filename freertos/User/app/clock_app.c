@@ -15,6 +15,7 @@
 #define WIFI_CHECK_INTERVAL_MS     5000U
 #define WIFI_DISCONNECT_MISSES        2U
 #define TIME_RETRY_INTERVAL_MS   10000U
+#define TIME_SYNC_INTERVAL_MS  3600000U
 #define WEATHER_INTERVAL_MS     60000U
 #define INDOOR_INTERVAL_MS       2000U
 #define RTC_REFRESH_INTERVAL_MS   200U
@@ -152,9 +153,12 @@ static void update_wifi(clock_app_state_t *state)
 static void update_network_time(clock_app_state_t *state)
 {
     weather_rtc_time_t network_time;
+    uint32_t sync_interval;
 
-    if (!state->wifi_connected || state->esp_time_synced ||
-        (g_system_ms - state->last_esp_time_try) < TIME_RETRY_INTERVAL_MS)
+    sync_interval = state->esp_time_synced ? TIME_SYNC_INTERVAL_MS :
+                                              TIME_RETRY_INTERVAL_MS;
+    if (!state->wifi_connected ||
+        (g_system_ms - state->last_esp_time_try) < sync_interval)
         return;
 
     state->last_esp_time_try = g_system_ms;
@@ -167,6 +171,8 @@ static void update_network_time(clock_app_state_t *state)
             print_esp_failure("SNTP config");
         if (state->sntp_configured)
             state->last_esp_time_try = g_system_ms - TIME_RETRY_INTERVAL_MS;
+        else
+            state->esp_time_synced = 0U;
         return;
     }
 
@@ -184,11 +190,13 @@ static void update_network_time(clock_app_state_t *state)
         }
         else
         {
+            state->esp_time_synced = 0U;
             printf("[RTC] rejected parsed network time\r\n");
         }
     }
     else
     {
+        state->esp_time_synced = 0U;
         print_esp_failure("SNTP time");
         printf("[SNTP] response: %s\r\n", EspAt_LastTimeResponse());
     }
