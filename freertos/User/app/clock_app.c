@@ -34,9 +34,9 @@ typedef struct
     uint8_t displayed_second;
     uint8_t current_weather_valid;
     uint8_t forecast_valid;
-    uint8_t weather_update_time_valid;
-    uint8_t weather_updated_hour;
-    uint8_t weather_updated_minute;
+    uint8_t complete_weather_time_valid;
+    uint8_t complete_weather_hour;
+    uint8_t complete_weather_minute;
     char wifi_ssid[33];
     uint32_t last_weather_read;
     uint32_t current_weather_updated_at;
@@ -129,7 +129,6 @@ static void update_wifi(clock_app_state_t *state)
             state->last_esp_time_try = g_system_ms - TIME_RETRY_INTERVAL_MS;
             state->last_weather_read = g_system_ms - WEATHER_INTERVAL_MS;
             ClockUi_PostWifiName(state->wifi_ssid);
-            ClockUi_PostClearWeatherUpdateTime();
             printf("[WIFI] connected\r\n");
         }
     }
@@ -144,10 +143,10 @@ static void update_wifi(clock_app_state_t *state)
         ClockUi_PostWifiName(NULL);
         if (state->current_weather_valid || state->forecast_valid)
             printf("[WEATHER] offline; keeping last successful data\r\n");
-        if (state->weather_update_time_valid)
+        if (state->complete_weather_time_valid)
         {
-            ClockUi_PostWeatherUpdatedAt(state->weather_updated_hour,
-                                         state->weather_updated_minute);
+            ClockUi_PostWeatherUpdatedAt(state->complete_weather_hour,
+                                         state->complete_weather_minute);
         }
         if (state->time_available)
         {
@@ -227,7 +226,8 @@ static void update_weather(clock_app_state_t *state)
 {
     esp_weather_t weather;
     weather_rtc_time_t updated_time;
-    uint8_t weather_updated = 0U;
+    uint8_t current_updated = 0U;
+    uint8_t forecast_updated = 0U;
 
     if (!state->wifi_connected || !state->time_query_attempted ||
         (g_system_ms - state->last_weather_read) < WEATHER_INTERVAL_MS)
@@ -238,7 +238,7 @@ static void update_weather(clock_app_state_t *state)
     {
         state->current_weather_valid = 1U;
         state->current_weather_updated_at = g_system_ms;
-        weather_updated = 1U;
+        current_updated = 1U;
         ClockUi_PostCurrentWeather(weather.temperature, weather.code);
         printf("[WEATHER] current temperature=%d code=%u\r\n",
                weather.temperature, weather.code);
@@ -253,7 +253,7 @@ static void update_weather(clock_app_state_t *state)
     {
         state->forecast_valid = 1U;
         state->forecast_updated_at = g_system_ms;
-        weather_updated = 1U;
+        forecast_updated = 1U;
         ClockUi_PostForecast(weather.high, weather.low);
         printf("[WEATHER] forecast high=%d low=%d\r\n",
                weather.high, weather.low);
@@ -264,12 +264,13 @@ static void update_weather(clock_app_state_t *state)
         printf("[WEATHER] forecast request failed; keeping previous data\r\n");
     }
 
-    if (weather_updated && state->time_available)
+    if (current_updated && forecast_updated && state->time_available)
     {
         WeatherRtc_Get(&updated_time);
-        state->weather_updated_hour = updated_time.hour;
-        state->weather_updated_minute = updated_time.minute;
-        state->weather_update_time_valid = 1U;
+        state->complete_weather_hour = updated_time.hour;
+        state->complete_weather_minute = updated_time.minute;
+        state->complete_weather_time_valid = 1U;
+        ClockUi_PostClearWeatherUpdateTime();
     }
 }
 
