@@ -868,6 +868,11 @@
               <FilePath>..\..\User\esp_at\weather_parser.c</FilePath>
             </File>
             <File>
+              <FileName>at_response.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\esp_at\at_response.c</FilePath>
+            </File>
+            <File>
               <FileName>clock_ui.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app\clock_ui.c</FilePath>

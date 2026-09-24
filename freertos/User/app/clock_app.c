@@ -52,6 +52,23 @@ static void wait_ms(uint32_t duration)
     vTaskDelay(pdMS_TO_TICKS(duration));
 }
 
+static void print_esp_failure(const char *operation)
+{
+    esp_at_diagnostics_t diagnostics;
+
+    EspAt_GetDiagnostics(&diagnostics);
+    printf("[ESP] %s failed: %s; errors=%lu timeouts=%lu "
+           "response_overflows=%lu rx_overflows=%lu dropped=%lu "
+           "parse_errors=%lu\r\n",
+           operation, EspAt_ResultName(EspAt_LastResult()),
+           (unsigned long)diagnostics.at_errors,
+           (unsigned long)diagnostics.timeouts,
+           (unsigned long)diagnostics.response_overflows,
+           (unsigned long)diagnostics.rx_queue_overflows,
+           (unsigned long)diagnostics.rx_dropped_bytes,
+           (unsigned long)diagnostics.parse_errors);
+}
+
 static void wait_for_wifi(clock_app_state_t *state)
 {
     uint32_t wifi_start = g_system_ms;
@@ -73,8 +90,10 @@ static void wait_for_wifi(clock_app_state_t *state)
         printf("[WIFI] connected\r\n");
         ClockPage_ShowWifiResult(1U);
         state->sntp_configured = EspAt_ConfigureSntp();
-        printf(state->sntp_configured ? "[SNTP] configured\r\n" :
-                                        "[SNTP] config failed; retrying\r\n");
+        if (state->sntp_configured)
+            printf("[SNTP] configured\r\n");
+        else
+            print_esp_failure("SNTP config");
     }
     else
     {
@@ -142,26 +161,35 @@ static void update_network_time(clock_app_state_t *state)
     if (!state->sntp_configured)
     {
         state->sntp_configured = EspAt_ConfigureSntp();
-        printf(state->sntp_configured ? "[SNTP] configured\r\n" :
-                                        "[SNTP] config failed; retrying\r\n");
+        if (state->sntp_configured)
+            printf("[SNTP] configured\r\n");
+        else
+            print_esp_failure("SNTP config");
         if (state->sntp_configured)
             state->last_esp_time_try = g_system_ms - TIME_RETRY_INTERVAL_MS;
         return;
     }
 
     state->time_query_attempted = 1U;
-    if (EspAt_RequestTime(&network_time) && WeatherRtc_Set(&network_time))
+    if (EspAt_RequestTime(&network_time))
     {
-        state->esp_time_synced = 1U;
-        state->time_available = 1U;
-        state->rtc_ready = 1U;
-        state->displayed_second = network_time.second;
-        ClockUi_PostTime(&network_time);
-        printf("[SNTP] RTC updated\r\n");
+        if (WeatherRtc_Set(&network_time))
+        {
+            state->esp_time_synced = 1U;
+            state->time_available = 1U;
+            state->rtc_ready = 1U;
+            state->displayed_second = network_time.second;
+            ClockUi_PostTime(&network_time);
+            printf("[SNTP] RTC updated\r\n");
+        }
+        else
+        {
+            printf("[RTC] rejected parsed network time\r\n");
+        }
     }
     else
     {
-        printf("[SNTP] no valid time; retrying\r\n");
+        print_esp_failure("SNTP time");
         printf("[SNTP] response: %s\r\n", EspAt_LastTimeResponse());
     }
 }
@@ -185,6 +213,7 @@ static void update_weather(clock_app_state_t *state)
     }
     else
     {
+        print_esp_failure("current weather");
         printf("[WEATHER] current request failed; keeping previous data\r\n");
     }
 
@@ -198,6 +227,7 @@ static void update_weather(clock_app_state_t *state)
     }
     else
     {
+        print_esp_failure("forecast");
         printf("[WEATHER] forecast request failed; keeping previous data\r\n");
     }
 }

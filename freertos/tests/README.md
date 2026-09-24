@@ -13,3 +13,14 @@ cc -std=c99 -Wall -Wextra -Werror \
 The cases cover valid positive and negative values, range boundaries, missing
 fields, malformed integers and the rule that failed parsing must not overwrite
 the previous valid weather values.
+
+The AT response capture test verifies `OK` and `ERROR` framing, confirms that
+embedded words are not mistaken for terminals, and checks that a response can
+report buffer overflow while still recognizing its trailing terminal:
+
+```sh
+cc -std=c99 -Wall -Wextra -Werror \
+  at_response_test.c ../User/esp_at/at_response.c \
+  -o at_response_test
+./at_response_test
+```
