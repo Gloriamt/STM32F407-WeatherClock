@@ -80,14 +80,18 @@ was:
 | --- | ---: |
 | UI/time/network/indoor minimum remaining stack | 934/445/657/478 words |
 | UI/DHT maximum duration | 32/24 ms |
-| Current-weather/forecast maximum request duration | 8011/4850 ms |
+| Current-weather/forecast maximum request-attempt duration | 8011/4850 ms |
 | ESP response/RX overflows, dropped bytes and parse errors | 0/0/0/0 |
 | Current/minimum free heap | 17000/12776 bytes |
 
 The minimum heap value did not fall below the earlier measurement. A
 second-level comparison after the run showed the display about 3 seconds behind
 the phone reference; because the UI displays only hours and minutes, this does
-not represent a one-minute clock error.
+not represent a one-minute clock error. Request duration currently includes
+both successful and failed attempts. The 8011 ms current-weather maximum is
+close to the configured 8000 ms timeout, so this measurement alone cannot show
+whether that attempt succeeded or timed out. A future metrics update can record
+per-operation success and timeout counts.
 
 ## Validation status
 
