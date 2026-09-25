@@ -70,6 +70,25 @@ dropped-byte or parser counters increase. The 32 KiB heap retained 12776 bytes
 at its observed minimum, so the current task and queue allocations have usable
 headroom.
 
+### 24-hour validation
+
+A continuous target-board run completed on 2026-09-25 with the display,
+Wi-Fi, time, indoor readings and weather operating normally. The final report
+was:
+
+| Metric | Value after 24 hours |
+| --- | ---: |
+| UI/time/network/indoor minimum remaining stack | 934/445/657/478 words |
+| UI/DHT maximum duration | 32/24 ms |
+| Current-weather/forecast maximum request duration | 8011/4850 ms |
+| ESP response/RX overflows, dropped bytes and parse errors | 0/0/0/0 |
+| Current/minimum free heap | 17000/12776 bytes |
+
+The minimum heap value did not fall below the earlier measurement. A
+second-level comparison after the run showed the display about 3 seconds behind
+the phone reference; because the UI displays only hours and minutes, this does
+not represent a one-minute clock error.
+
 ## Validation status
 
 Hardware validation covers online and offline startup, saved RTC operation,
