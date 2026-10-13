@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img" aria-labelledby="title description">
+  <title id="title">天气时钟实机照片待补充</title>
+  <desc id="description">此图为仓库展示占位，不是开发板照片。后续替换为真实运行照片。</desc>
+  <rect width="960" height="360" rx="20" fill="#f3f6fa"/>
+  <rect x="24" y="24" width="912" height="312" rx="12" fill="none" stroke="#c0cbd8" stroke-width="2" stroke-dasharray="8 8"/>
+  <g font-family="Segoe UI, Microsoft YaHei, Noto Sans CJK SC, sans-serif" text-anchor="middle">
+    <text x="480" y="122" fill="#245a83" font-size="20" font-weight="600">STM32F407 · FreeRTOS · ESP32-C3</text>
+    <text x="480" y="184" fill="#1f2937" font-size="34" font-weight="600">实机运行照片 · 待补充</text>
+    <text x="480" y="232" fill="#475569" font-size="18">此图仅作占位，不代表实物运行效果</text>
+    <text x="480" y="280" fill="#64748b" font-size="16">时间日期 / 室内温湿度 / 上海天气 / Wi-Fi 状态</text>
+  </g>
+</svg>
