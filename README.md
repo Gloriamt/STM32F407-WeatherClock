@@ -21,7 +21,7 @@
 
 ## 实物效果
 
-![实机照片待补充：此图仅为展示占位，不是开发板运行照片](docs/media/board-placeholder.svg)
+![STM32F407 天气时钟实机运行](docs/media/board-running.jpg)
 
 | 展示内容 | 当前状态 |
 | --- | --- |
